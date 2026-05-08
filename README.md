@@ -80,5 +80,5 @@ if (rgba == jp.array([0.5, 0.5, 0.5, 1.0])).all():
 Now, we are ready to run the train script. To run the code, you'll need a GPU. For Humanoid-based environments, it may require up to 80GB of GPU memory (for deep networks). Below is an example command to run the training script (an additional example can be found in the provided slurm script `job.slurm`): 
 
 ```sh
-uv run train.py --env_id "humanoid" --eval_env_id "humanoid" --num_epochs 100 --total_env_steps 100000000 --critic_depth 16 --actor_depth 16 --actor_skip_connections 4 --critic_skip_connections 4 --batch_size 512 --vis_length 1000 --save_buffer 0 
+uv run train.py --env_id "ant" --eval_env_id "ant" --num_epochs 10 --total_env_steps 300000 --critic_depth 16 --actor_depth 16 --actor_skip_connections 4 --critic_skip_connections 4 --vis_length 1000  --save_buffer 0  --num_envs 16 --min_replay_size 2000 --unroll_length 20 
 ```
