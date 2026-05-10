@@ -15,11 +15,11 @@ uv sync
 ```
 Failed to build `pytinyrenderer==0.0.14`
 ```
-You probably need Microsoft Visual C++ 14.0 or greater, because pytinyrenderer is written in C++.
+You probably need Microsoft Visual C++ 14.0 or greater, because `pytinyrendere`r is written in C++.
 
 1) Go to: https://visualstudio.microsoft.com/pl/visual-cpp-build-tools/
 2) Download and install the build tools.
-3) In build tools select: "Desktop development with C++". In optional (on the right) select also `Windows 10/11 SDK` and `MSVC v143 - VS 2022 C++ x64/x86`.
+3) In build tools select: `Desktop development with C++`. In optional (on the right) select also `Windows 10/11 SDK` and `MSVC v143 - VS 2022 C++ x64/x86`.
 
 After installation `uv sync` should work. 
 Then just fix the two Brax issues described below, and you'll be all set.
