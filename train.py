@@ -514,7 +514,6 @@ if __name__ == "__main__":
     env_keys = jax.random.split(env_key, args.num_envs)
     env_state = jax.jit(env.reset)(env_keys)
     env.step = jax.jit(env.step)
-    
     print(f"obs_size: {obs_size}, action_size: {action_size}", flush=True)
     
     
@@ -987,6 +986,8 @@ if __name__ == "__main__":
 
     training_walltime = 0
     print('starting training....', flush=True)
+    print(f"Using devices: {jax.devices()}", flush=True)
+
     start_time = time.time() 
     for ne in range(args.num_epochs):
         

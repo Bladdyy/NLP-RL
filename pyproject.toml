@@ -5,13 +5,10 @@ description = "1000 Layer Networks for Self-Supervised RL: Scaling Depth Can Ena
 readme = "README.md"
 requires-python = "==3.10.*"
 dependencies = [
-    "numpy==1.26.4",
-    "jax==0.4.23",
-    "jaxlib==0.4.23+cuda12.cudnn89; platform_system == 'Linux'",
-    "nvidia-cudnn-cu11>=8.9,<9.0; platform_system == 'Linux'",
-    "nvidia-cuda-cupti-cu12>=12.4; platform_system == 'Linux'",
-    "nvidia-cusolver-cu12>=11.7.3.90; platform_system == 'Linux'",
-    "jaxlib==0.4.23; platform_system != 'Linux'",
+"numpy==1.26.4",
+    "jax[cuda12_pip]==0.4.23",
+    "nvidia-cudnn-cu12==8.9.2.26", # Force the specific version JAX 0.4.23 wants
+    "nvidia-cublas-cu12",
     "flax==0.7.4",
     "tyro",
     "wandb==0.17.9",
