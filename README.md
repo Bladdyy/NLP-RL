@@ -15,7 +15,7 @@ uv sync
 ```
 Failed to build `pytinyrenderer==0.0.14`
 ```
-You probably need Microsoft Visual C++ 14.0 or greater, because `pytinyrendere`r is written in C++.
+You probably need Microsoft Visual C++ 14.0 or greater, because `pytinyrenderer` is written in C++.
 
 1) Go to: https://visualstudio.microsoft.com/pl/visual-cpp-build-tools/
 2) Download and install the build tools.
