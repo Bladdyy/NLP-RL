@@ -6,9 +6,10 @@ readme = "README.md"
 requires-python = "==3.10.*"
 dependencies = [
 "numpy==1.26.4",
-    "jax[cuda12_pip]==0.4.23",
-    "nvidia-cudnn-cu12==8.9.2.26", # Force the specific version JAX 0.4.23 wants
-    "nvidia-cublas-cu12",
+    "jax[cuda12_pip]==0.4.23; platform_system == 'Linux'",
+    "nvidia-cudnn-cu12==8.9.2.26; platform_system == 'Linux'",
+    "nvidia-cublas-cu12; platform_system == 'Linux'",
+    "jaxlib==0.4.23; platform_system != 'Linux'",
     "flax==0.7.4",
     "tyro",
     "wandb==0.17.9",
