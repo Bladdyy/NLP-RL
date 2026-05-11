@@ -32,7 +32,7 @@ Then just fix the two Brax issues described below, and you'll be all set.
 
 
 ## Fixing two bugs in brax 0.10.1
-1. There is a minor bug in brax's contact.py file. To fix it, first locate the brax contact.py file in your virtual environment: 
+1. There is a minor bug in brax's contact.py file. To fix it, first locate the brax contact.py file in your virtual environment:
 
 `Linux`:
 ```
@@ -44,6 +44,10 @@ find .venv -name contact.py
 Get-ChildItem -Path .venv -Filter contact.py -Recurse
 ```
 
+`By-hand`:
+```
+.venv/lib/brax/contact.py
+```
 
 Then open the file and replace it with the following code:
 ```python
@@ -104,6 +108,12 @@ find .venv -name json.py | grep "/brax/io/json.py"
 ```
 Get-ChildItem -Path .venv -Filter json.py -Recurse | Where-Object { $_.FullName -like "*\brax\io\json.py" }
 ```
+
+`By-hand`:
+```
+.venv/lib/brax/io/json.py
+```
+
 Then open the file and change the if statement in line 159 to:  
 ```python
 if (rgba == jp.array([0.5, 0.5, 0.5, 1.0])).all():
