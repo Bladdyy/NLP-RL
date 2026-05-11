@@ -4,8 +4,10 @@
 
 # GPU
 
-To work with this repo you will need GPU. 
+To train models using this repo you will need GPU.
 If you don't own one, a good option is to create https://lightning.ai/ account. You will get 15 credits every month to work with GPU, which is approximately 30 hours of work.
+### Try using lightning.ai only when training.
+
 
 # Installation
 
