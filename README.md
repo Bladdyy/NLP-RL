@@ -5,8 +5,15 @@
 # GPU
 
 To train models using this repo you will need GPU.
-If you don't own one, a good option is to create https://lightning.ai/ account. You will get 15 credits every month to work with GPU, which is approximately 30 hours of work.
-### Try using lightning.ai only when training.
+
+### Easy but limited:
+If you don't own one, a good option is to create https://lightning.ai/ account. You will get 15 credits every month to work with GPU, which is approximately 30 hours of work on GPU similar to collab.
+For example using A100 ~ 6 hours.
+`Try using lightning.ai only when training/local checks.`
+
+# Big trainings:
+
+`TBD`
 
 
 # Installation
@@ -119,10 +126,25 @@ Then open the file and change the if statement in line 159 to:
 if (rgba == jp.array([0.5, 0.5, 0.5, 1.0])).all():
 ```
 
+# Logging
+
+For loging and visulizations we use `[wandb.ai](https://wandb.ai/)`. 
+
+1) Create wandb account.
+2) Create a project.
+3) Create an API key.
+4) Run: `uv run wandb login`.
+5) Run: `wandb sync --project PROJECT-NAME --entity USERNAME PATH-TO-WANDB-LOGS `.
 
 # Running experiments
 Now, we are ready to run the train script. To run the code, you'll need a GPU. (Possible on CPU, but really long). Reasonable parameters below: 
 
+1) Test if working.
 ```sh
 uv run train.py --env_id "ant" --eval_env_id "ant" --num_epochs 10 --total_env_steps 300000 --critic_depth 16 --actor_depth 16 --actor_skip_connections 4 --critic_skip_connections 4 --vis_length 1000  --save_buffer 0  --num_envs 16 --min_replay_size 2000 --unroll_length 20 
+```
+
+2) More real scenario.
+```sh
+uv run train.py --env_id "humanoid" --eval_env_id "humanoid" --num_epochs 50 --total_env_steps 50000000 --critic_depth 32 --actor_depth 32 --actor_skip_connections 4 --critic_skip_connections 4 --vis_length 1000  --save_buffer 0  --num_envs 512 --min_replay_size 1000 --unroll_length 62
 ```
