@@ -128,7 +128,7 @@ if (rgba == jp.array([0.5, 0.5, 0.5, 1.0])).all():
 
 # Logging
 
-For loging and visulizations we use `[wandb.ai](https://wandb.ai/)`. 
+For loging and visulizations we use [wandb.ai](https://wandb.ai/). 
 
 1) Create wandb account.
 2) Create a project.
