@@ -11,7 +11,7 @@ If you don't own one, a good option is to create https://lightning.ai/ account. 
 For example using A100 ~ 6 hours.
 `Try using lightning.ai only when training/local checks.`
 
-# Big trainings:
+### Bigger trainings:
 
 `TBD`
 
