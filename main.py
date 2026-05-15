@@ -222,5 +222,4 @@ if __name__ == "__main__":
         hours_passed = (time.time() - start_time) / 3600
         print(f"Time elapsed: {hours_passed:.3f} hours", flush=True)
 
-    
     save_results(actor, args, training_state, buffer_state, save_path)
