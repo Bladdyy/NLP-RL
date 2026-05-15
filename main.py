@@ -141,10 +141,12 @@ if __name__ == "__main__":
             key=eval_env_key,
         )
         
+
     elif args.eval_actor == 1:
         key, eval_actor_key = jax.random.split(key)
         evaluator = CrlEvaluator(
             lambda training_state, env, env_state, extra_fields: actor_step(
+                actor,
                 training_state,
                 env,
                 env_state,
@@ -156,17 +158,21 @@ if __name__ == "__main__":
             episode_length=args.episode_length,
             key=eval_env_key,
         )
-    
+        
     elif args.eval_actor > 1:
         key, eval_actor_key = jax.random.split(key)
         evaluator = CrlEvaluator(
             # Replace deterministic_actor_step with a partial function of multi_sample_actor_step
             lambda training_state, env, env_state, extra_fields: multi_sample_actor_step(
+                actor,
                 training_state, 
                 env, 
                 env_state, 
                 eval_actor_key, 
                 args.eval_actor,
+                args,
+                sa_encoder,
+                g_encoder,
                 extra_fields
             ),
             eval_env,

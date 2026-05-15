@@ -62,7 +62,7 @@ def deterministic_actor_step(actor, training_state, env, env_state, extra_fields
         extras={"state_extras": state_extras},
     )
 
-def actor_step(actor,training_state, env, env_state, key, extra_fields):
+def actor_step(actor, training_state, env, env_state, key, extra_fields):
     means, log_stds = actor.apply(training_state.actor_state.params, env_state.obs)
     stds = jnp.exp(log_stds)
     actions = nn.tanh( means + stds * jax.random.normal(key, shape=means.shape, dtype=means.dtype) )
