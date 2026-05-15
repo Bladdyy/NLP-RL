@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 from buffer import TrajectoryUniformSamplingQueue
 
-from modules.actor import actor_step, deterministic_actor_step, multi_sample_actor_step
+from modules.actor import generate_step_functions
 from loss import create_loss_functions
 
 
@@ -14,7 +14,8 @@ since these are used in the training functions and are not expected to change du
 """
 def create_training_functions(actor, sa_encoder, g_encoder, env, args, replay_buffer, target_entropy):
     update_actor_and_alpha, update_critic = create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy)
-
+    deterministic_actor_step, actor_step, multi_sample_actor_step = generate_step_functions(actor, sa_encoder, g_encoder, args)
+    
     @jax.jit
     def get_experience(training_state, env_state, buffer_state, key):
         @jax.jit
@@ -22,11 +23,11 @@ def create_training_functions(actor, sa_encoder, g_encoder, env, args, replay_bu
             env_state, current_key = carry
             current_key, next_key = jax.random.split(current_key)
             if args.expl_actor == 1:
-                env_state, transition = actor_step(actor, training_state, env, env_state, current_key, extra_fields=("truncation", "seed"))
+                env_state, transition = actor_step(training_state, env, env_state, current_key, extra_fields=("truncation", "seed"))
             elif args.expl_actor == 0:
-                env_state, transition = deterministic_actor_step(actor, training_state, env, env_state, extra_fields=("truncation", "seed"))
+                env_state, transition = deterministic_actor_step(training_state, env, env_state, extra_fields=("truncation", "seed"))
             else:
-                env_state, transition = multi_sample_actor_step(actor, training_state, env, env_state, current_key, args.expl_actor, args, sa_encoder, g_encoder, extra_fields=("truncation", "seed"))
+                env_state, transition = multi_sample_actor_step(training_state, env, env_state, current_key, args.expl_actor, extra_fields=("truncation", "seed"))
             return (env_state, next_key), transition
 
         (env_state, _), data = jax.lax.scan(f, (env_state, key), (), length=args.unroll_length)
