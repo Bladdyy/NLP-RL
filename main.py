@@ -14,7 +14,7 @@ from buffer import TrajectoryUniformSamplingQueue
 from config import Args
 
 from envs.env_functions import make_env
-from modules.actor import Actor, actor_step, deterministic_actor_step, multi_sample_actor_step
+from modules.actor import Actor, generate_step_functions
 from modules.critic import SA_encoder, G_encoder
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
@@ -131,6 +131,8 @@ if __name__ == "__main__":
     
 
     # Evaluator setup -----------------------------------------------------------------------------------------------------------------------------------------
+    actor_step, deterministic_actor_step, multi_sample_actor_step = generate_step_functions(actor, sa_encoder, g_encoder, args)
+
     if args.eval_actor == 0:
         '''Setting up evaluator'''
         evaluator = CrlEvaluator(
@@ -146,7 +148,6 @@ if __name__ == "__main__":
         key, eval_actor_key = jax.random.split(key)
         evaluator = CrlEvaluator(
             lambda training_state, env, env_state, extra_fields: actor_step(
-                actor,
                 training_state,
                 env,
                 env_state,
@@ -164,15 +165,11 @@ if __name__ == "__main__":
         evaluator = CrlEvaluator(
             # Replace deterministic_actor_step with a partial function of multi_sample_actor_step
             lambda training_state, env, env_state, extra_fields: multi_sample_actor_step(
-                actor,
                 training_state, 
                 env, 
                 env_state, 
                 eval_actor_key, 
                 args.eval_actor,
-                args,
-                sa_encoder,
-                g_encoder,
                 extra_fields
             ),
             eval_env,
