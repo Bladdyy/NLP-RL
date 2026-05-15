@@ -129,7 +129,7 @@ def save_results(actor, args, training_state, buffer_state, save_path):
             
             rollout_states = []
             for i in range(args.num_render):
-                env = make_env(args.eval_env_id)
+                env = make_env(args.eval_env_id, args)
                 
                 rng = jax.random.PRNGKey(seed=i+1)
                 env_state = jax.jit(env.reset)(rng)

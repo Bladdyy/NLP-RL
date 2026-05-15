@@ -260,7 +260,6 @@ if __name__ == "__main__":
 
     # Training loop start -------------------------------------------------------------------------------------------------------------------------------------
     training_walltime = 0
-    metrics = evaluator.run_evaluation(training_state, {})
     print('Starting training....', flush=True)
     print(f"Using devices: {jax.devices()}", flush=True)
 
