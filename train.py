@@ -12,9 +12,8 @@ It is necessary to create the training functions that way, so as to be able to @
 They need actor, sa_encoder, g_encoder, env, args and replay_buffer upfront as arguments, 
 since these are used in the training functions and are not expected to change during training.
 """
-def create_training_functions(actor, sa_encoder, g_encoder, env, args, replay_buffer, target_entropy):
+def create_training_functions(actor, sa_encoder, g_encoder, env, args, replay_buffer, target_entropy, deterministic_actor_step, actor_step, multi_sample_actor_step):
     update_actor_and_alpha, update_critic = create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy)
-    deterministic_actor_step, actor_step, multi_sample_actor_step = generate_step_functions(actor, sa_encoder, g_encoder, args)
     
     @jax.jit
     def get_experience(training_state, env_state, buffer_state, key):
