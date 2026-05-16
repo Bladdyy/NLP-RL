@@ -63,7 +63,7 @@ def setup_project(args):
     args.num_prefill_env_steps = args.min_replay_size * args.num_envs
     print(f"num_prefill_env_steps: {args.num_prefill_env_steps}", flush=True)
 
-    args.num_prefill_actor_steps = np.ceil(args.min_replay_size / args.unroll_length)
+    args.num_prefill_actor_steps = int(np.ceil(args.min_replay_size / args.unroll_length))
     print(f"num_prefill_actor_steps: {args.num_prefill_actor_steps}", flush=True)
 
     args.num_training_steps_per_epoch = (args.total_env_steps - args.num_prefill_env_steps) // (args.num_epochs * args.env_steps_per_actor_step)
