@@ -2,7 +2,7 @@ import flax.linen as nn
 from flax.linen.initializers import variance_scaling
 import jax
 import jax.numpy as jnp
-from modules.utils import residual_block
+from modules.utils import residual_block, TransformerBackbone
 from utils import Transition
 
 class Actor(nn.Module):
@@ -46,6 +46,47 @@ class Actor(nn.Module):
 
         return mean, log_std
     
+
+class TransformerActor(nn.Module):
+    """Transformer-based actor that outputs action mean and log_std.
+
+    Uses TransformerBackbone internally for sequence processing.
+    The tokenization strategy can be customized by subclassing TransformerBackbone
+    and overriding _vector_to_sequence.
+    """
+    action_size: int
+    embed_dim: int = 256
+    num_layers: int = 4
+    num_heads: int = 4
+    mlp_ratio: int = 4
+    num_patches: int = 8
+    dropout_rate: float = 0.0
+    use_cls_token: bool = True
+    LOG_STD_MAX = 2
+    LOG_STD_MIN = -5
+
+    @nn.compact
+    def __call__(self, x):
+        x = TransformerBackbone(
+            embed_dim=self.embed_dim,
+            num_layers=self.num_layers,
+            num_heads=self.num_heads,
+            mlp_ratio=self.mlp_ratio,
+            num_patches=self.num_patches,
+            dropout_rate=self.dropout_rate,
+            use_cls_token=self.use_cls_token,
+        )(x)
+
+        lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
+        bias_init = nn.initializers.zeros
+
+        mean = nn.Dense(self.action_size, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+        log_std = nn.Dense(self.action_size, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+
+        log_std = nn.tanh(log_std)
+        log_std = self.LOG_STD_MIN + 0.5 * (self.LOG_STD_MAX - self.LOG_STD_MIN) * (log_std + 1)
+
+        return mean, log_std
 
 
 """

@@ -15,8 +15,8 @@ from buffer import TrajectoryUniformSamplingQueue
 from config import Args
 
 from envs.env_functions import make_env
-from modules.actor import Actor, generate_step_functions
-from modules.critic import SA_encoder, G_encoder
+from modules.actor import Actor, TransformerActor, generate_step_functions
+from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
@@ -56,7 +56,19 @@ if __name__ == "__main__":
     # Actor and critic setup ----------------------------------------------------------------------------------------------------------------------------------
 
     # Actor
-    actor = Actor(action_size=action_size, network_width=args.actor_network_width, network_depth=args.actor_depth, skip_connections=args.actor_skip_connections, use_relu=args.use_relu)
+    if args.use_transformer:
+        actor = TransformerActor(
+            action_size=action_size,
+            embed_dim=args.transformer_embed_dim,
+            num_layers=args.transformer_num_layers,
+            num_heads=args.transformer_num_heads,
+            mlp_ratio=args.transformer_mlp_ratio,
+            num_patches=args.transformer_num_patches,
+            dropout_rate=args.transformer_dropout,
+            use_cls_token=bool(args.transformer_use_cls_token),
+        )
+    else:
+        actor = Actor(action_size=action_size, network_width=args.actor_network_width, network_depth=args.actor_depth, skip_connections=args.actor_skip_connections, use_relu=args.use_relu)
     actor_state = TrainState.create(
         apply_fn=actor.apply,
         params=actor.init(actor_key, np.ones([1, obs_size])),
@@ -64,9 +76,29 @@ if __name__ == "__main__":
     )
 
     # Critic
-    sa_encoder = SA_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+    if args.use_transformer:
+        sa_encoder = TransformerSAEncoder(
+            embed_dim=args.transformer_embed_dim,
+            num_layers=args.transformer_num_layers,
+            num_heads=args.transformer_num_heads,
+            mlp_ratio=args.transformer_mlp_ratio,
+            num_patches=args.transformer_num_patches,
+            dropout_rate=args.transformer_dropout,
+            use_cls_token=bool(args.transformer_use_cls_token),
+        )
+        g_encoder = TransformerGEncoder(
+            embed_dim=args.transformer_embed_dim,
+            num_layers=args.transformer_num_layers,
+            num_heads=args.transformer_num_heads,
+            mlp_ratio=args.transformer_mlp_ratio,
+            num_patches=args.transformer_num_patches,
+            dropout_rate=args.transformer_dropout,
+            use_cls_token=bool(args.transformer_use_cls_token),
+        )
+    else:
+        sa_encoder = SA_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+        g_encoder = G_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
     sa_encoder_params = sa_encoder.init(sa_key, np.ones([1, args.obs_dim]), np.ones([1, action_size]))
-    g_encoder = G_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
     g_encoder_params = g_encoder.init(g_key, np.ones([1, args.goal_end_idx - args.goal_start_idx]))
     
     critic_state = TrainState.create(

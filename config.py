@@ -68,6 +68,15 @@ class Args:
     entropy_param: float = 0.5
     disable_entropy: int = 0
     use_relu: int = 0
+    use_transformer: int = 0
+    # Transformer-specific config (only used when use_transformer = 1)
+    transformer_embed_dim: int = 256
+    transformer_num_layers: int = 4
+    transformer_num_heads: int = 4
+    transformer_mlp_ratio: int = 4
+    transformer_num_patches: int = 8
+    transformer_dropout: float = 0.0
+    transformer_use_cls_token: int = 1
     num_render: int = 10
     save_buffer: int = 0
     
