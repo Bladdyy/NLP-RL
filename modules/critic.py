@@ -3,6 +3,8 @@ from flax.linen.initializers import variance_scaling
 import jax
 import jax.numpy as jnp
 
+# from modules.utils import residual_block
+
 lecun_uniform = variance_scaling(1/3, "fan_in", "uniform")
 bias_init = nn.initializers.zeros
 
@@ -79,6 +81,9 @@ class SA_encoder(nn.Module):
     network_depth: int = 4
     num_heads: int = 8
     use_relu: int = 0
+    # For comaptibility between encoders, not used for now
+    norm_type = "layer_norm"
+    skip_connections: int = 0
 
     @nn.compact
     def __call__(self, s: jnp.ndarray, a: jnp.ndarray):
@@ -142,6 +147,9 @@ class G_encoder(nn.Module):
     network_depth: int = 4
     num_heads: int = 8
     use_relu: int = 0
+    # For comaptibility between encoders, not used for now
+    norm_type = "layer_norm"
+    skip_connections: int = 0
 
     @nn.compact
     def __call__(self, g: jnp.ndarray):
@@ -174,3 +182,72 @@ class G_encoder(nn.Module):
         x = nn.Dense(64, kernel_init=lecun_uniform, bias_init=bias_init)(x)
 
         return x
+    
+
+# class SA_encoder(nn.Module):
+#     norm_type = "layer_norm"
+#     network_width: int = 1024
+#     network_depth: int = 4
+#     skip_connections: int = 0
+#     use_relu: int = 0
+#     @nn.compact
+#     def __call__(self, s: jnp.ndarray, a: jnp.ndarray):
+
+#         lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
+#         bias_init = nn.initializers.zeros
+        
+#         if self.norm_type == "layer_norm":
+#             normalize = lambda x: nn.LayerNorm()(x)
+#         else:
+#             normalize = lambda x: x
+        
+#         if self.use_relu:
+#             activation = nn.relu
+#         else:
+#             activation = nn.swish
+            
+#         x = jnp.concatenate([s, a], axis=-1)
+#         #Initial layer
+#         x = nn.Dense(self.network_width, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+#         x = normalize(x)
+#         x = activation(x)
+#         #Residual blocks
+#         for i in range(self.network_depth // 4):
+#             x = residual_block(x, self.network_width, normalize, activation)
+#         #Final layer
+#         x = nn.Dense(64, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+#         return x
+    
+# class G_encoder(nn.Module):
+#     norm_type = "layer_norm"
+#     network_width: int = 1024
+#     network_depth: int = 4
+#     skip_connections: int = 0
+#     use_relu: int = 0
+#     @nn.compact
+#     def __call__(self, g: jnp.ndarray):
+
+#         lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
+#         bias_init = nn.initializers.zeros
+
+#         if self.norm_type == "layer_norm":
+#             normalize = lambda x: nn.LayerNorm()(x)
+#         else:
+#             normalize = lambda x: x
+        
+#         if self.use_relu:
+#             activation = nn.relu
+#         else:
+#             activation = nn.swish
+        
+#         x = g
+#         #Initial layer
+#         x = nn.Dense(self.network_width, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+#         x = normalize(x)
+#         x = activation(x)
+#         #Residual blocks
+#         for i in range(self.network_depth // 4):
+#             x = residual_block(x, self.network_width, normalize, activation)
+#         #Final layer
+#         x = nn.Dense(64, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+#         return x
