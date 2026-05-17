@@ -54,4 +54,85 @@ They need actor, sa_encoder, g_encoder and args upfront as arguments,
 since these are used in the training functions and are not expected to change during training.
 """
 def generate_step_functions(actor, sa_encoder, g_encoder, args):
-    return None
+
+    def deterministic_actor_step(training_state, env, env_state, extra_fields):
+        means, _ = actor.apply(training_state.actor_state.params, env_state.obs)
+        actions = nn.tanh( means )
+
+        nstate = env.step(env_state, actions)
+        state_extras = {x: nstate.info[x] for x in extra_fields}
+        
+        return nstate, Transition(
+            observation=env_state.obs,
+            action=actions,
+            reward=nstate.reward,
+            discount=1-nstate.done,
+            extras={"state_extras": state_extras},
+        )
+
+    def actor_step(training_state, env, env_state, key, extra_fields):
+        means, log_stds = actor.apply(training_state.actor_state.params, env_state.obs)
+        stds = jnp.exp(log_stds)
+        actions = nn.tanh( means + stds * jax.random.normal(key, shape=means.shape, dtype=means.dtype) )
+
+        nstate = env.step(env_state, actions)
+        state_extras = {x: nstate.info[x] for x in extra_fields}
+        
+        return nstate, Transition(
+            observation=env_state.obs,
+            action=actions,
+            reward=nstate.reward,
+            discount=1-nstate.done,
+            extras={"state_extras": state_extras},
+        )
+        
+    def multi_sample_actor_step(training_state, env, env_state, key, K, extra_fields):
+        # Get K sets of actions from the actor
+        keys = jax.random.split(key, K)
+        means, log_stds = actor.apply(training_state.actor_state.params, env_state.obs)
+        stds = jnp.exp(log_stds)
+        
+        actions = jnp.stack([
+            nn.tanh(means + stds * jax.random.normal(k, shape=means.shape, dtype=means.dtype))
+            for k in keys
+        ])
+        
+        state = env_state.obs[:, :args.obs_dim]
+        goal = env_state.obs[:, args.obs_dim:]
+        
+        sa_reprs = jax.vmap(
+            lambda a: sa_encoder.apply(
+                training_state.critic_state.params["sa_encoder"], 
+                state, 
+                a
+            )
+        )(actions)
+        
+        g_repr = g_encoder.apply(
+            training_state.critic_state.params["g_encoder"], 
+            goal
+        ) 
+
+        q_values = -jnp.sqrt(
+            jnp.sum((sa_reprs - g_repr) ** 2, axis=-1)
+        )
+        
+        best_action_idx = jnp.argmax(q_values, axis=0)
+        best_actions = jnp.take_along_axis(
+            actions,
+            best_action_idx[None, :, None],
+            axis=0
+        )[0]
+        
+        # Step environment with best actions
+        nstate = env.step(env_state, best_actions)
+        state_extras = {x: nstate.info[x] for x in extra_fields}
+        
+        return nstate, Transition(
+            observation=env_state.obs,
+            action=best_actions,
+            reward=nstate.reward,
+            discount=1-nstate.done,
+            extras={"state_extras": state_extras},
+        )
+    return actor_step, deterministic_actor_step, multi_sample_actor_step
