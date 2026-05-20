@@ -148,3 +148,42 @@ uv run main.py --env_id "ant" --eval_env_id "ant" --num_epochs 10 --total_env_st
 ```sh
 uv run main.py --env_id "humanoid" --eval_env_id "humanoid" --num_epochs 50 --total_env_steps 50000000 --critic_depth 32 --actor_depth 32 --actor_skip_connections 4 --critic_skip_connections 4 --vis_length 1000  --save_buffer 0  --num_envs 512 --min_replay_size 1000 --unroll_length 62
 ```
+
+# Running on entropy
+
+Create `logs` directory in the same directory as your `main.py`. Create a `job.sh` file (content below - example for a small run), and finally, run `sbatch job.sh`.
+
+There might be a problem with vritual environment setup - more detailed instructions will be added soon. Short version: You have to create venv, run pip install uv, then uv sync, then add uv once again (I do not remember exact steps :P)
+
+```sh
+#!/bin/bash
+#
+#SBATCH --job-name=transformer-test
+#SBATCH --partition=a100
+#SBATCH --qos=jk450241_a100
+#SBATCH --gres=gpu:1
+#SBATCH --output=logs/slurm-transformer-test.txt
+#SBATCH --error=logs/slurm-transformer-test-error.txt
+#SBATCH --time=30
+
+echo "Started"
+
+set -eux
+
+uv run main.py \
+   --env_id "ant" \
+   --eval_env_id "ant" \
+   --num_epochs 10 \
+   --total_env_steps 300_000 \
+   --critic_depth 16 \
+   --actor_depth 16 \
+   --actor_skip_connections 4 \
+   --critic_skip_connections 4 \
+   --vis_length 1000  \
+   --save_buffer 0  \
+   --num_envs 16 \
+   --min_replay_size 2000 \
+   --unroll_length 20
+
+ echo "Finished"
+```
