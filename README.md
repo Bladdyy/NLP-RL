@@ -159,8 +159,8 @@ There might be a problem with vritual environment setup - more detailed instruct
 #!/bin/bash
 #
 #SBATCH --job-name=transformer-test
-#SBATCH --partition=a100
-#SBATCH --qos=jk450241_a100
+#SBATCH --partition= YOUR PARTITION
+#SBATCH --qos= YOUR QOS
 #SBATCH --gres=gpu:1
 #SBATCH --output=logs/slurm-transformer-test.txt
 #SBATCH --error=logs/slurm-transformer-test-error.txt
