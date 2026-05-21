@@ -70,7 +70,7 @@ class Args:
     use_relu: int = 0
     use_transformer: int = 0
     # Transformer-specific config (only used when use_transformer = 1)
-    transformer_embed_dim: int = 256
+    transformer_embed_dim: int = 144
     transformer_num_layers: int = 4
     transformer_num_heads: int = 4
     transformer_mlp_ratio: int = 4
