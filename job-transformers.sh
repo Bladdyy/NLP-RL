@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 #SBATCH --job-name=transformer-small
 #SBATCH --partition=common
