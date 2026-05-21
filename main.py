@@ -20,6 +20,20 @@ from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, Transfor
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
+
+def get_gpu_memory_stats():
+    """Return peak and current GPU memory usage in GB, or empty dict if unavailable."""
+    try:
+        stats = jax.devices()[0].memory_stats()
+        if stats:
+            return {
+                "gpu/peak_memory_gb": stats["peak_bytes_in_use"] / 1e9,
+                "gpu/current_memory_gb": stats["bytes_in_use"] / 1e9,
+            }
+    except Exception:
+        pass
+    return {}
+
 if __name__ == "__main__":
 
     print("Starting training script...", flush=True)
@@ -239,6 +253,8 @@ if __name__ == "__main__":
         }
 
         metrics = evaluator.run_evaluation(training_state, metrics)
+
+        metrics.update(get_gpu_memory_stats())
 
         print(f"epoch {ne} out of {args.num_epochs} complete. metrics: {metrics}", flush=True)
 
