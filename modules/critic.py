@@ -27,7 +27,6 @@ class SA_TransformerEncoder(nn.Module):
     num_heads: int = 4
     use_relu: int = 0
     norm_type = "layer_norm"
-    skip_connections: int = 1
 
     @nn.compact
     def __call__(self, s: jnp.ndarray, a: jnp.ndarray):
@@ -55,7 +54,6 @@ class SA_TransformerEncoder(nn.Module):
             mlp_dim=self.network_width * 2,
             use_relu=self.use_relu,
             norm_type=self.norm_type,
-            skip_connections=self.skip_connections,
         )(x)
 
         attn_logits = nn.Dense(1)(x)          
@@ -72,7 +70,6 @@ class G_TransformerEncoder(nn.Module):
     num_heads: int = 4
     use_relu: int = 0
     norm_type = "layer_norm"
-    skip_connections: int = 1
 
     @nn.compact
     def __call__(self, g: jnp.ndarray):
@@ -94,7 +91,6 @@ class G_TransformerEncoder(nn.Module):
             mlp_dim=self.network_width * 2,
             use_relu=self.use_relu,
             norm_type=self.norm_type,
-            skip_connections=self.skip_connections,
         )(goal_tokens)
 
         # Attention pooling
@@ -120,7 +116,6 @@ class SA_MlpEncoder(nn.Module):
     norm_type = "layer_norm"
     network_width: int = 1024
     network_depth: int = 4
-    skip_connections: int = 0
     use_relu: int = 0
     @nn.compact
     def __call__(self, s: jnp.ndarray, a: jnp.ndarray):
@@ -157,7 +152,6 @@ class G_MlpEncoder(nn.Module):
     norm_type = "layer_norm"
     network_width: int = 1024
     network_depth: int = 4
-    skip_connections: int = 0
     use_relu: int = 0
     @nn.compact
     def __call__(self, g: jnp.ndarray):

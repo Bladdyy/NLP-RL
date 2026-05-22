@@ -22,12 +22,12 @@ if __name__ == "__main__":
     print("\n--- Model Parameter Counts ---")
 
     if args.transformer_critic:
-        sa_encoder = SA_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
-        g_encoder = G_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+        sa_encoder = SA_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu)
+        g_encoder = G_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu)
     
     else:
-        sa_encoder = SA_MlpEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
-        g_encoder = G_MlpEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+        sa_encoder = SA_MlpEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu)
+        g_encoder = G_MlpEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu)
     
     dummy_obs = jnp.ones([batch_size, obs_dim])
     dummy_act = jnp.ones([batch_size, action_size])

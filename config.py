@@ -47,8 +47,6 @@ class Args:
     actor_network_width: int = 256
     actor_depth: int = 4
     critic_depth: int = 4
-    actor_skip_connections: int = 0 # 0 for no skip connections, >= 0 means the frequency of skip connections (every N layers)
-    critic_skip_connections: int = 1 # 0 for no skip connections, >= 0 means the frequency of skip connections (every N layers)
     
     num_episodes_per_env: int = 1 #recommended to keep at 1
     training_steps_multiplier: int = 1 #recommended to keep at 1

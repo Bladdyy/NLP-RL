@@ -56,7 +56,7 @@ if __name__ == "__main__":
     # Actor and critic setup ----------------------------------------------------------------------------------------------------------------------------------
 
     # Actor
-    actor = Actor(action_size=action_size, network_width=args.actor_network_width, network_depth=args.actor_depth, skip_connections=args.actor_skip_connections, use_relu=args.use_relu)
+    actor = Actor(action_size=action_size, network_width=args.actor_network_width, network_depth=args.actor_depth, use_relu=args.use_relu)
     actor_state = TrainState.create(
         apply_fn=actor.apply,
         params=actor.init(actor_key, np.ones([1, obs_size])),
@@ -65,12 +65,12 @@ if __name__ == "__main__":
 
     # Critic
     if args.transformer_critic:
-        sa_encoder = SA_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
-        g_encoder = G_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+        sa_encoder = SA_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu)
+        g_encoder = G_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu)
     
     else:
-        sa_encoder = SA_MlpEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
-        g_encoder = G_MlpEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+        sa_encoder = SA_MlpEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu)
+        g_encoder = G_MlpEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu)
     
     sa_encoder_params = sa_encoder.init(sa_key, np.ones([1, args.obs_dim]), np.ones([1, action_size]))
     g_encoder_params = g_encoder.init(g_key, np.ones([1, args.goal_end_idx - args.goal_start_idx]))
