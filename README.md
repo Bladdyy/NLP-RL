@@ -141,12 +141,12 @@ Now, we are ready to run the train script. To run the code, you'll need a GPU. (
 
 1) Test if working.
 ```sh
-uv run main.py --env_id "ant" --eval_env_id "ant" --num_epochs 10 --total_env_steps 300000 --critic_depth 16 --actor_depth 16 --actor_skip_connections 4 --critic_skip_connections 4 --vis_length 1000  --save_buffer 0  --num_envs 16 --min_replay_size 2000 --unroll_length 20 
+uv run main.py --env_id "ant" --eval_env_id "ant" --num_epochs 10 --total_env_steps 300000 --critic_depth 16 --actor_depth 16 --actor_skip_connections 4 --critic_skip_connections 4 --vis_length 1000  --save_buffer 0  --num_envs 16 --min_replay_size 2000 --unroll_length 20 --transformer_critic
 ```
 
 2) More real scenario.
 ```sh
-uv run main.py --env_id "humanoid" --eval_env_id "humanoid" --num_epochs 50 --total_env_steps 50000000 --critic_depth 32 --actor_depth 32 --actor_skip_connections 4 --critic_skip_connections 4 --vis_length 1000  --save_buffer 0  --num_envs 512 --min_replay_size 1000 --unroll_length 62
+uv run main.py --env_id "humanoid" --eval_env_id "humanoid" --num_epochs 50 --total_env_steps 50000000 --critic_depth 32 --actor_depth 32 --actor_skip_connections 4 --critic_skip_connections 4 --vis_length 1000  --save_buffer 0  --num_envs 512 --min_replay_size 1000 --unroll_length 62 --transformer_critic
 ```
 
 # Running on entropy

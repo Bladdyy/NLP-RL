@@ -16,7 +16,7 @@ from config import Args
 
 from envs.env_functions import make_env
 from modules.actor import Actor, generate_step_functions
-from modules.critic import SA_encoder, G_encoder
+from modules.critic import SA_TransformerEncoder, G_TransformerEncoder, SA_MlpEncoder, G_MlpEncoder
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
@@ -64,9 +64,15 @@ if __name__ == "__main__":
     )
 
     # Critic
-    sa_encoder = SA_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+    if args.transformer_critic:
+        sa_encoder = SA_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+        g_encoder = G_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+    
+    else:
+        sa_encoder = SA_MlpEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+        g_encoder = G_MlpEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+    
     sa_encoder_params = sa_encoder.init(sa_key, np.ones([1, args.obs_dim]), np.ones([1, action_size]))
-    g_encoder = G_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
     g_encoder_params = g_encoder.init(g_key, np.ones([1, args.goal_end_idx - args.goal_start_idx]))
     
     critic_state = TrainState.create(

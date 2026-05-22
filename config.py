@@ -42,6 +42,7 @@ class Args:
     
     unroll_length: int  = 62
 
+    transformer_critic: bool = False
     critic_network_width: int = 256
     actor_network_width: int = 256
     actor_depth: int = 4
