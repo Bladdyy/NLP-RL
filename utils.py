@@ -136,7 +136,8 @@ def save_results(actor, args, training_state, buffer_state, save_path):
                 
                 for _ in range(args.vis_length):
                     env_state, current_state = policy_step(env_state, training_state.actor_state.params)
-                    rollout_states.append(current_state.pipeline_state)
+                    ps = jax.tree_util.tree_map(lambda x: x[0], current_state.pipeline_state)
+                    rollout_states.append(ps)
             
             # Render and save
             html_string = html.render(env.sys, rollout_states)
