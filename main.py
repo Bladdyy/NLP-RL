@@ -15,8 +15,8 @@ from buffer import TrajectoryUniformSamplingQueue
 from config import Args
 
 from envs.env_functions import make_env
-from modules.actor import Actor, TransformerActor, generate_step_functions
-from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder
+from modules.actor import Actor, TransformerActor, SemanticTransformerActor, generate_step_functions
+from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
@@ -71,16 +71,27 @@ if __name__ == "__main__":
 
     # Actor
     if args.use_transformer:
-        actor = TransformerActor(
-            action_size=action_size,
-            embed_dim=args.transformer_embed_dim,
-            num_layers=args.transformer_num_layers,
-            num_heads=args.transformer_num_heads,
-            mlp_ratio=args.transformer_mlp_ratio,
-            num_patches=args.transformer_num_patches,
-            dropout_rate=args.transformer_dropout,
-            use_cls_token=bool(args.transformer_use_cls_token),
-        )
+        if args.semantic_tokens:
+            actor = SemanticTransformerActor(
+                action_size=action_size,
+                embed_dim=args.transformer_embed_dim,
+                num_layers=args.transformer_num_layers,
+                num_heads=args.transformer_num_heads,
+                mlp_ratio=args.transformer_mlp_ratio,
+                dropout_rate=args.transformer_dropout,
+                use_cls_token=bool(args.transformer_use_cls_token),
+            )
+        else:
+            actor = TransformerActor(
+                action_size=action_size,
+                embed_dim=args.transformer_embed_dim,
+                num_layers=args.transformer_num_layers,
+                num_heads=args.transformer_num_heads,
+                mlp_ratio=args.transformer_mlp_ratio,
+                num_patches=args.transformer_num_patches,
+                dropout_rate=args.transformer_dropout,
+                use_cls_token=bool(args.transformer_use_cls_token),
+            )
     else:
         actor = Actor(action_size=action_size, network_width=args.actor_network_width, network_depth=args.actor_depth, skip_connections=args.actor_skip_connections, use_relu=args.use_relu)
     actor_state = TrainState.create(
@@ -91,22 +102,40 @@ if __name__ == "__main__":
 
     # Critic
     if args.use_transformer:
-        sa_encoder = TransformerSAEncoder(
-            embed_dim=args.transformer_embed_dim,
-            num_layers=args.transformer_num_layers,
-            num_heads=args.transformer_num_heads,
-            mlp_ratio=args.transformer_mlp_ratio,
-            num_patches=args.transformer_num_patches,
-            dropout_rate=args.transformer_dropout,
-            use_cls_token=bool(args.transformer_use_cls_token),
-        )
-        g_encoder = TransformerGEncoder(
-            embed_dim=args.transformer_embed_dim,
-            num_layers=args.transformer_num_layers,
-            num_heads=args.transformer_num_heads,
-            mlp_ratio=args.transformer_mlp_ratio,
-            num_patches=args.transformer_num_patches,
-            dropout_rate=args.transformer_dropout,
+        if args.semantic_tokens:
+            sa_encoder = SemanticTransformerSAEncoder(
+                embed_dim=args.transformer_embed_dim,
+                num_layers=args.transformer_num_layers,
+                num_heads=args.transformer_num_heads,
+                mlp_ratio=args.transformer_mlp_ratio,
+                dropout_rate=args.transformer_dropout,
+                use_cls_token=bool(args.transformer_use_cls_token),
+            )
+            g_encoder = SemanticTransformerGEncoder(
+                embed_dim=args.transformer_embed_dim,
+                num_layers=args.transformer_num_layers,
+                num_heads=args.transformer_num_heads,
+                mlp_ratio=args.transformer_mlp_ratio,
+                dropout_rate=args.transformer_dropout,
+                use_cls_token=bool(args.transformer_use_cls_token),
+            )
+        else:
+            sa_encoder = TransformerSAEncoder(
+                embed_dim=args.transformer_embed_dim,
+                num_layers=args.transformer_num_layers,
+                num_heads=args.transformer_num_heads,
+                mlp_ratio=args.transformer_mlp_ratio,
+                num_patches=args.transformer_num_patches,
+                dropout_rate=args.transformer_dropout,
+                use_cls_token=bool(args.transformer_use_cls_token),
+            )
+            g_encoder = TransformerGEncoder(
+                embed_dim=args.transformer_embed_dim,
+                num_layers=args.transformer_num_layers,
+                num_heads=args.transformer_num_heads,
+                mlp_ratio=args.transformer_mlp_ratio,
+                num_patches=args.transformer_num_patches,
+                dropout_rate=args.transformer_dropout,
             use_cls_token=bool(args.transformer_use_cls_token),
         )
     else:

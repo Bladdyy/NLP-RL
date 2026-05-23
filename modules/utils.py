@@ -76,8 +76,10 @@ class TransformerBackbone(nn.Module):
 
     @nn.compact
     def __call__(self, x, deterministic=True):
-        # 1. Flat vector -> sequence of tokens
-        x = self._vector_to_sequence(x)
+        # 1. Flat vector -> sequence of tokens (only if input is 2D)
+        # If x is already (batch, seq_len, embed_dim), skip tokenization
+        if x.ndim == 2:
+            x = self._vector_to_sequence(x)
 
         # 2. Optional CLS token
         if self.use_cls_token:

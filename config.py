@@ -69,6 +69,7 @@ class Args:
     disable_entropy: int = 0
     use_relu: int = 0
     use_transformer: int = 0
+    semantic_tokens: int = 0
     # Transformer-specific config (only used when use_transformer = 1)
     transformer_embed_dim: int = 144
     transformer_num_layers: int = 4

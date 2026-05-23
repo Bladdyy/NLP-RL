@@ -141,3 +141,126 @@ class TransformerGEncoder(nn.Module):
 
         x = nn.Dense(64, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
         return x
+
+
+class SemanticTransformerSAEncoder(nn.Module):
+    """SA encoder with semantically meaningful tokens.
+
+    Parses the 29-dim ant state (root qpos, hinge qpos, root qvel, hinge qvel)
+    and the 8-dim action into 9 tokens:
+      - 1 body token: root qpos (7) + root qvel (6) = 13 dims
+      - 8 hinge tokens: each (hinge qpos, hinge qvel, hinge action) = 3 dims
+
+    Each token type uses a separate Dense embedding layer to account for
+    the asymmetry in raw dimension sizes.
+    """
+    embed_dim: int = 256
+    num_layers: int = 4
+    num_heads: int = 4
+    mlp_ratio: int = 4
+    dropout_rate: float = 0.0
+    use_cls_token: bool = True
+
+    @nn.compact
+    def __call__(self, s: jnp.ndarray, a: jnp.ndarray):
+        lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
+        bias_init = nn.initializers.zeros
+
+        # Parse 29-dim state:
+        #   [0:7]   = root qpos (tx, ty, tz, qw, qx, qy, qz)
+        #   [7:15]  = hinge qpos [hip_1, ankle_1, ..., hip_4, ankle_4]
+        #   [15:21] = root qvel
+        #   [21:29] = hinge qvel [same order as qpos]
+        root_qpos = s[..., :7]            # (batch, 7)
+        hinge_qpos = s[..., 7:15]         # (batch, 8)
+        root_qvel = s[..., 15:21]         # (batch, 6)
+        hinge_qvel = s[..., 21:29]        # (batch, 8)
+
+        # Reorder action to match qpos/qvel hinge order (body tree order).
+        # Action from env: [hip_4, ankle_4, hip_1, ankle_1, hip_2, ankle_2, hip_3, ankle_3]
+        # Desired order:   [hip_1, ankle_1, hip_2, ankle_2, hip_3, ankle_3, hip_4, ankle_4]
+        action_reorder = jnp.array([2, 3, 4, 5, 6, 7, 0, 1])
+        a = a[..., action_reorder]        # (batch, 8)
+
+        # Body token: root qpos + root qvel = 13 dims
+        body_raw = jnp.concatenate([root_qpos, root_qvel], axis=-1)  # (batch, 13)
+        body_token = nn.Dense(
+            self.embed_dim,
+            kernel_init=lecun_unfirom,
+            bias_init=bias_init,
+            name='body_embed',
+        )(body_raw)  # (batch, embed_dim)
+
+        # Build 8 hinge tokens, each (qpos_i, qvel_i, action_i) = 3 dims
+        hinge_raw = jnp.stack([hinge_qpos, hinge_qvel, a], axis=-1)  # (batch, 8, 3)
+        hinge_tokens = nn.Dense(
+            self.embed_dim,
+            kernel_init=lecun_unfirom,
+            bias_init=bias_init,
+            name='hinge_embed',
+        )(hinge_raw)  # (batch, 8, embed_dim)
+
+        # Assemble token sequence: [body, hinge_1, ..., hinge_8]
+        tokens = jnp.concatenate([
+            body_token[:, jnp.newaxis, :],
+            hinge_tokens,
+        ], axis=1)  # (batch, 9, embed_dim)
+
+        # Pass through shared transformer backbone (skips _vector_to_sequence
+        # since tokens is already 3D)
+        x = TransformerBackbone(
+            embed_dim=self.embed_dim,
+            num_layers=self.num_layers,
+            num_heads=self.num_heads,
+            mlp_ratio=self.mlp_ratio,
+            num_patches=0,  # unused when input is 3D
+            dropout_rate=self.dropout_rate,
+            use_cls_token=self.use_cls_token,
+        )(tokens)
+
+        # Final projection to 64-dim representation
+        x = nn.Dense(64, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+        return x
+
+
+class SemanticTransformerGEncoder(nn.Module):
+    """Goal encoder with a single semantic token.
+
+    Embeds the 2-dim goal (future ant x, y) as a single token and processes
+    it through TransformerBackbone.
+    """
+    embed_dim: int = 256
+    num_layers: int = 4
+    num_heads: int = 4
+    mlp_ratio: int = 4
+    dropout_rate: float = 0.0
+    use_cls_token: bool = True
+
+    @nn.compact
+    def __call__(self, g: jnp.ndarray):
+        lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
+        bias_init = nn.initializers.zeros
+
+        # Single goal token: embed 2-dim goal directly to embed_dim
+        token = nn.Dense(
+            self.embed_dim,
+            kernel_init=lecun_unfirom,
+            bias_init=bias_init,
+            name='goal_embed',
+        )(g)  # (batch, embed_dim)
+        tokens = token[:, jnp.newaxis, :]  # (batch, 1, embed_dim)
+
+        # Pass through shared transformer backbone
+        x = TransformerBackbone(
+            embed_dim=self.embed_dim,
+            num_layers=self.num_layers,
+            num_heads=self.num_heads,
+            mlp_ratio=self.mlp_ratio,
+            num_patches=0,  # unused when input is 3D
+            dropout_rate=self.dropout_rate,
+            use_cls_token=self.use_cls_token,
+        )(tokens)
+
+        # Final projection to 64-dim representation
+        x = nn.Dense(64, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+        return x
