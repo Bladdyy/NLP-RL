@@ -13,8 +13,8 @@ echo "Started"
 set -eux
 
 uv run main.py \
-  --env_id "ant_maze_u4" \
-  --eval_env_id "ant_maze_u4" \
+  --env_id "ant_u4_maze" \
+  --eval_env_id "ant_u4_maze" \
   --num_epochs 100 \
   --episode_length 1000 \
   --total_env_steps 100_000_000 \
