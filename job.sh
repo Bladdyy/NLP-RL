@@ -1,8 +1,8 @@
 #!/bin/bash
 #
 #SBATCH --job-name=crl-mlp
-#SBATCH --partition=common
-#SBATCH --qos=ok479034_common
+#SBATCH --partition=a100
+#SBATCH --qos=jh479001_a100
 #SBATCH --gres=gpu:1
 #SBATCH --output=logs/slurm-crl-mlp.txt
 #SBATCH --error=logs/slurm-crl-mlp-error.txt
