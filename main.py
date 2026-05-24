@@ -15,8 +15,8 @@ from buffer import TrajectoryUniformSamplingQueue
 from config import Args
 
 from envs.env_functions import make_env
-from modules.actor import Actor, TransformerActor, SemanticTransformerActor, generate_step_functions
-from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder
+from modules.actor import Actor, TransformerActor, SemanticTransformerActor, PerDimTransformerActor, generate_step_functions
+from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
@@ -71,7 +71,7 @@ if __name__ == "__main__":
 
     # Actor
     if args.use_transformer:
-        if args.semantic_tokens:
+        if args.tokenization == "semantic":
             actor = SemanticTransformerActor(
                 action_size=action_size,
                 embed_dim=args.transformer_embed_dim,
@@ -80,6 +80,18 @@ if __name__ == "__main__":
                 mlp_ratio=args.transformer_mlp_ratio,
                 dropout_rate=args.transformer_dropout,
                 use_cls_token=bool(args.transformer_use_cls_token),
+                pooling=args.transformer_pooling,
+            )
+        elif args.tokenization == "per_dim":
+            actor = PerDimTransformerActor(
+                action_size=action_size,
+                embed_dim=args.transformer_embed_dim,
+                num_layers=args.transformer_num_layers,
+                num_heads=args.transformer_num_heads,
+                mlp_ratio=args.transformer_mlp_ratio,
+                dropout_rate=args.transformer_dropout,
+                use_cls_token=bool(args.transformer_use_cls_token),
+                pooling=args.transformer_pooling,
             )
         else:
             actor = TransformerActor(
@@ -91,6 +103,7 @@ if __name__ == "__main__":
                 num_patches=args.transformer_num_patches,
                 dropout_rate=args.transformer_dropout,
                 use_cls_token=bool(args.transformer_use_cls_token),
+                pooling=args.transformer_pooling,
             )
     else:
         actor = Actor(action_size=action_size, network_width=args.actor_network_width, network_depth=args.actor_depth, skip_connections=args.actor_skip_connections, use_relu=args.use_relu)
@@ -102,7 +115,7 @@ if __name__ == "__main__":
 
     # Critic
     if args.use_transformer:
-        if args.semantic_tokens:
+        if args.tokenization == "semantic":
             sa_encoder = SemanticTransformerSAEncoder(
                 embed_dim=args.transformer_embed_dim,
                 num_layers=args.transformer_num_layers,
@@ -110,6 +123,7 @@ if __name__ == "__main__":
                 mlp_ratio=args.transformer_mlp_ratio,
                 dropout_rate=args.transformer_dropout,
                 use_cls_token=bool(args.transformer_use_cls_token),
+                pooling=args.transformer_pooling,
             )
             g_encoder = SemanticTransformerGEncoder(
                 embed_dim=args.transformer_embed_dim,
@@ -118,6 +132,26 @@ if __name__ == "__main__":
                 mlp_ratio=args.transformer_mlp_ratio,
                 dropout_rate=args.transformer_dropout,
                 use_cls_token=bool(args.transformer_use_cls_token),
+                pooling=args.transformer_pooling,
+            )
+        elif args.tokenization == "per_dim":
+            sa_encoder = PerDimTransformerSAEncoder(
+                embed_dim=args.transformer_embed_dim,
+                num_layers=args.transformer_num_layers,
+                num_heads=args.transformer_num_heads,
+                mlp_ratio=args.transformer_mlp_ratio,
+                dropout_rate=args.transformer_dropout,
+                use_cls_token=bool(args.transformer_use_cls_token),
+                pooling=args.transformer_pooling,
+            )
+            g_encoder = PerDimTransformerGEncoder(
+                embed_dim=args.transformer_embed_dim,
+                num_layers=args.transformer_num_layers,
+                num_heads=args.transformer_num_heads,
+                mlp_ratio=args.transformer_mlp_ratio,
+                dropout_rate=args.transformer_dropout,
+                use_cls_token=bool(args.transformer_use_cls_token),
+                pooling=args.transformer_pooling,
             )
         else:
             sa_encoder = TransformerSAEncoder(
@@ -128,6 +162,7 @@ if __name__ == "__main__":
                 num_patches=args.transformer_num_patches,
                 dropout_rate=args.transformer_dropout,
                 use_cls_token=bool(args.transformer_use_cls_token),
+                pooling=args.transformer_pooling,
             )
             g_encoder = TransformerGEncoder(
                 embed_dim=args.transformer_embed_dim,
@@ -136,8 +171,9 @@ if __name__ == "__main__":
                 mlp_ratio=args.transformer_mlp_ratio,
                 num_patches=args.transformer_num_patches,
                 dropout_rate=args.transformer_dropout,
-            use_cls_token=bool(args.transformer_use_cls_token),
-        )
+                use_cls_token=bool(args.transformer_use_cls_token),
+                pooling=args.transformer_pooling,
+            )
     else:
         sa_encoder = SA_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
         g_encoder = G_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)

@@ -69,7 +69,7 @@ class Args:
     disable_entropy: int = 0
     use_relu: int = 0
     use_transformer: int = 0
-    semantic_tokens: int = 0
+    tokenization: str = "patches"  # "patches", "semantic", or "per_dim"
     # Transformer-specific config (only used when use_transformer = 1)
     transformer_embed_dim: int = 144
     transformer_num_layers: int = 4
@@ -78,6 +78,7 @@ class Args:
     transformer_num_patches: int = 8
     transformer_dropout: float = 0.0
     transformer_use_cls_token: int = 1
+    transformer_pooling: str = "cls"  # "cls", "mean", or "flatten"
     num_render: int = 10
     save_buffer: int = 0
     

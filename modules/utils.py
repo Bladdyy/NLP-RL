@@ -73,6 +73,7 @@ class TransformerBackbone(nn.Module):
     num_patches: int = 8
     dropout_rate: float = 0.0
     use_cls_token: bool = True
+    pooling: str = "cls"  # "cls", "mean", or "flatten"
 
     @nn.compact
     def __call__(self, x, deterministic=True):
@@ -111,10 +112,17 @@ class TransformerBackbone(nn.Module):
             )(x, deterministic=deterministic)
 
         # 5. Pool to single vector
-        if self.use_cls_token:
+        if self.pooling == "cls":
             x = x[:, 0]
-        else:
+        elif self.pooling == "mean":
             x = jnp.mean(x, axis=1)
+        elif self.pooling == "flatten":
+            b, s, d = x.shape
+            x = x.reshape(b, s * d)
+            x = nn.LayerNorm()(x)
+            x = nn.Dense(d, kernel_init=nn.initializers.xavier_uniform(), name='pool_proj')(x)
+        else:
+            raise ValueError(f"Unknown pooling: {self.pooling}")
 
         return x
 

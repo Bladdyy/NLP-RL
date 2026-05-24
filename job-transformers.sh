@@ -35,8 +35,8 @@ uv run main.py \
   --transformer_mlp_ratio 4 \
   --transformer_num_patches 8 \
   --transformer_dropout 0.0 \
-  --transformer_use_cls_token 1 \
-  --semantic_tokens 0
+  --transformer_pooling flatten \
+  --tokenization per_dim
 
  echo "Finished"
                    
