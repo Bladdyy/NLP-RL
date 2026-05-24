@@ -122,22 +122,23 @@ def save_results(actor, args, training_state, buffer_state, save_path):
             """Renders the policy and saves it as an HTML file."""
             @jax.jit
             def policy_step(env_state, actor_params):
-                means, _ = actor.apply(actor_params, env_state.obs)
+                batched_obs = jax.tree_util.tree_map(lambda x: jnp.expand_dims(x, axis=0), env_state.obs)
+                means, _ = actor.apply(actor_params, batched_obs)
                 actions = nn.tanh(means)
+                actions = jnp.squeeze(actions, axis=0).flatten()
                 next_state = env.step(env_state, actions)
                 return next_state, env_state 
             
             rollout_states = []
-            for i in range(args.num_render):
-                env = make_env(args.eval_env_id, args)
-                
+            env = make_env(args.eval_env_id, args)
+
+            for i in range(args.num_render):                
                 rng = jax.random.PRNGKey(seed=i+1)
                 env_state = jax.jit(env.reset)(rng)
                 
                 for _ in range(args.vis_length):
                     env_state, current_state = policy_step(env_state, training_state.actor_state.params)
-                    ps = jax.tree_util.tree_map(lambda x: x[0], current_state.pipeline_state)
-                    rollout_states.append(ps)
+                    rollout_states.append(current_state.pipeline_state)
             
             # Render and save
             html_string = html.render(env.sys, rollout_states)
