@@ -27,24 +27,33 @@ class SA_TransformerEncoder(nn.Module):
     num_heads: int = 4
     use_relu: int = 0
     norm_type = "layer_norm"
+    two_tokens_only: bool = False
 
     @nn.compact
     def __call__(self, s: jnp.ndarray, a: jnp.ndarray):
-        # Change state and action into token embeddings.
-        state_embedding = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init)(s)
-        action_embedding = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init)(a)
+        if not self.two_tokens_only:
+            s = jnp.expand_dims(s, axis=-1)  # (batch, state_dim, 1)
+            a = jnp.expand_dims(a, axis=-1)  # (batch, action_dim, 1)
+            state_token = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init)(s)   # (batch, state_dim, width)
+            action_token = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init)(a)  # (batch, action_dim, width)
 
-        # Add a token dimension (treat state and action as separate tokens)
-        state_token = jnp.expand_dims(state_embedding, axis=1)
-        action_token = jnp.expand_dims(action_embedding, axis=1)
+            state_dim = state_token.shape[1]
+            action_dim = action_token.shape[1]
+            state_type = self.param("state_type", nn.initializers.normal(), (1, state_dim, self.network_width))
+            action_type = self.param("action_type", nn.initializers.normal(), (1, action_dim, self.network_width))
+        else:
+            state_embedding = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init)(s)
+            action_embedding = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init)(a)
+            state_token = jnp.expand_dims(state_embedding, axis=1)   # (batch, 1, width)
+            action_token = jnp.expand_dims(action_embedding, axis=1)  # (batch, 1, width)
 
-        # Add your token type embeddings (learned position/type signals).
-        state_type = self.param("state_type", nn.initializers.normal(), (1, 1, self.network_width))
-        action_type = self.param("action_type", nn.initializers.normal(), (1, 1, self.network_width))
+            state_type = self.param("state_type", nn.initializers.normal(), (1, 1, self.network_width))
+            action_type = self.param("action_type", nn.initializers.normal(), (1, 1, self.network_width))
+
         state_token = state_token + state_type
         action_token = action_token + action_type
 
-        # Concatenate into a final sequence of exactly 2 tokens
+        # (batch, state_dim + action_dim, width) lub (batch, 2, width)
         x = jnp.concatenate([state_token, action_token], axis=1)
 
         x = TransformerEncoder(
