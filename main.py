@@ -21,7 +21,7 @@ from utils import TrainingState, Transition, save_params, jit_wrap, setup_projec
 from train import create_training_functions
 
 
-def make_transformer_optimizer(learning_rate, weight_decay, max_norm, params, warmup_steps=20000):
+def make_transformer_optimizer(learning_rate, weight_decay, max_norm, params, warmup_steps=2_000_000):
     """Build an optimizer with gradient clipping, linear LR warmup, and AdamW weight decay
     applied only to multi-dimensional parameters (weights), not 1D biases or norms.
     Returns (optimizer, lr_schedule) where lr_schedule can be called with a step count."""
