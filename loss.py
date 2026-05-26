@@ -37,7 +37,8 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         else:
             actor_loss = jnp.mean( jnp.exp(log_alpha) * log_prob - (qf_pi) )
 
-        return actor_loss, log_prob
+        sa_embedding_norm = jnp.sqrt(jnp.sum(sa_repr ** 2, axis=-1)).mean()
+        return actor_loss, (log_prob, sa_embedding_norm)
 
 
     def alpha_loss(alpha_params, log_prob):
@@ -63,10 +64,15 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         logsumexp = jax.nn.logsumexp(logits + 1e-6, axis=1)
         critic_loss += args.logsumexp_penalty_coeff * jnp.mean(logsumexp**2)
 
-        I, correct, logits_pos, logits_neg = jnp.zeros(1), jnp.zeros(1), jnp.zeros(1), jnp.zeros(1)
-            
+        B = logits.shape[0]
+        I = jnp.zeros(1)
+        correct = jnp.mean(jnp.argmax(logits, axis=1) == jnp.arange(B))
+        logits_pos = jnp.mean(jnp.diag(logits))
+        logits_neg = (jnp.sum(logits) - jnp.sum(jnp.diag(logits))) / (B * (B - 1))
 
-        return critic_loss, (logsumexp, I, correct, logits_pos, logits_neg)
+        sa_embedding_norm = jnp.sqrt(jnp.sum(sa_repr ** 2, axis=-1)).mean()
+
+        return critic_loss, (logsumexp, I, correct, logits_pos, logits_neg, sa_embedding_norm)
 
 
     @jax.jit
@@ -78,8 +84,10 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         )
         
         
-        (actorloss, log_prob), actor_grad = jax.value_and_grad(actor_loss, has_aux=True)(training_state.actor_state.params, training_state.critic_state.params, training_state.alpha_state.params['log_alpha'], transitions, key)
+        (actorloss, (log_prob, actor_sa_embedding_norm)), actor_grad = jax.value_and_grad(actor_loss, has_aux=True)(training_state.actor_state.params, training_state.critic_state.params, training_state.alpha_state.params['log_alpha'], transitions, key)
         new_actor_state = training_state.actor_state.apply_gradients(grads=actor_grad)
+
+        actor_grad_norm = jnp.sqrt(jax.tree_util.tree_reduce(lambda s, x: s + jnp.sum(x ** 2), jax.tree_util.tree_leaves(actor_grad), initializer=0.0))
 
         alphaloss, alpha_grad = jax.value_and_grad(alpha_loss)(training_state.alpha_state.params, log_prob)
         new_alpha_state = training_state.alpha_state.apply_gradients(grads=alpha_grad)
@@ -91,6 +99,8 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
             "actor_loss": actorloss,
             "alph_aloss": alphaloss,   
             "log_alpha": training_state.alpha_state.params["log_alpha"],
+            "grad_norm_actor": actor_grad_norm,
+            "sa_embedding_norm": actor_sa_embedding_norm,
         }
 
         return training_state, metrics
@@ -103,8 +113,11 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
             transitions
         )
             
-        (loss, (logsumexp, I, correct, logits_pos, logits_neg)), grad = jax.value_and_grad(critic_loss, has_aux=True)(training_state.critic_state.params, transitions, key)
+        (loss, (logsumexp, I, correct, logits_pos, logits_neg, critic_sa_embedding_norm)), grad = jax.value_and_grad(critic_loss, has_aux=True)(training_state.critic_state.params, transitions, key)
         new_critic_state = training_state.critic_state.apply_gradients(grads=grad)
+
+        critic_grad_norm = jnp.sqrt(jax.tree_util.tree_reduce(lambda s, x: s + jnp.sum(x ** 2), jax.tree_util.tree_leaves(grad), initializer=0.0))
+
         training_state = training_state.replace(critic_state = new_critic_state)
 
         metrics = {
@@ -113,6 +126,8 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
             "logits_neg": logits_neg,
             "logsumexp": logsumexp.mean(),
             "critic_loss": loss,
+            "grad_norm_critic": critic_grad_norm,
+            "sa_embedding_norm": critic_sa_embedding_norm,
         }
 
         return training_state, metrics

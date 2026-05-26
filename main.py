@@ -21,18 +21,25 @@ from utils import TrainingState, Transition, save_params, jit_wrap, setup_projec
 from train import create_training_functions
 
 
-def get_gpu_memory_stats():
-    """Return peak and current GPU memory usage in GB, or empty dict if unavailable."""
-    try:
-        stats = jax.devices()[0].memory_stats()
-        if stats:
-            return {
-                "gpu/peak_memory_gb": stats["peak_bytes_in_use"] / 1e9,
-                "gpu/current_memory_gb": stats["bytes_in_use"] / 1e9,
-            }
-    except Exception:
-        pass
-    return {}
+def make_transformer_optimizer(learning_rate, weight_decay, max_norm, params, warmup_steps=20000):
+    """Build an optimizer with gradient clipping, linear LR warmup, and AdamW weight decay
+    applied only to multi-dimensional parameters (weights), not 1D biases or norms.
+    Returns (optimizer, lr_schedule) where lr_schedule can be called with a step count."""
+    lr_schedule = optax.join_schedules([
+        optax.linear_schedule(0.0, learning_rate, transition_steps=warmup_steps),
+        optax.constant_schedule(learning_rate),
+    ], boundaries=[warmup_steps])
+
+    def wd_mask_fn(params):
+        def is_weight(path, value):
+            return value.ndim == 2
+        return jax.tree_util.tree_map_with_path(is_weight, params)
+
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(max_norm),
+        optax.adamw(learning_rate=lr_schedule, weight_decay=weight_decay, mask=wd_mask_fn),
+    )
+    return optimizer, lr_schedule
 
 if __name__ == "__main__":
 
@@ -107,10 +114,19 @@ if __name__ == "__main__":
             )
     else:
         actor = Actor(action_size=action_size, network_width=args.actor_network_width, network_depth=args.actor_depth, skip_connections=args.actor_skip_connections, use_relu=args.use_relu)
+    actor_params = actor.init(actor_key, np.ones([1, obs_size]))
+    actor_lr_schedule = None
+    if args.use_transformer:
+        actor_tx, actor_lr_schedule = make_transformer_optimizer(
+            args.transformer_lr, args.transformer_weight_decay,
+            args.grad_clip_max_norm, actor_params
+        )
+    else:
+        actor_tx = optax.adam(learning_rate=args.actor_lr)
     actor_state = TrainState.create(
         apply_fn=actor.apply,
-        params=actor.init(actor_key, np.ones([1, obs_size])),
-        tx=optax.adam(learning_rate=args.actor_lr)
+        params=actor_params,
+        tx=actor_tx,
     )
 
     # Critic
@@ -179,14 +195,23 @@ if __name__ == "__main__":
         g_encoder = G_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
     sa_encoder_params = sa_encoder.init(sa_key, np.ones([1, args.obs_dim]), np.ones([1, action_size]))
     g_encoder_params = g_encoder.init(g_key, np.ones([1, args.goal_end_idx - args.goal_start_idx]))
-    
+    critic_params = {
+        "sa_encoder": sa_encoder_params,
+        "g_encoder": g_encoder_params
+    }
+
+    critic_lr_schedule = None
+    if args.use_transformer:
+        critic_tx, critic_lr_schedule = make_transformer_optimizer(
+            args.transformer_lr, args.transformer_weight_decay,
+            args.grad_clip_max_norm, critic_params
+        )
+    else:
+        critic_tx = optax.adam(learning_rate=args.critic_lr)
     critic_state = TrainState.create(
         apply_fn=None,
-        params={
-            "sa_encoder": sa_encoder_params, 
-            "g_encoder": g_encoder_params
-            },
-        tx=optax.adam(learning_rate=args.critic_lr),
+        params=critic_params,
+        tx=critic_tx,
     )
 
     # Entropy coefficient
@@ -317,9 +342,15 @@ if __name__ == "__main__":
             **{f"training/{name}": value for name, value in metrics.items()},
         }
 
-        metrics = evaluator.run_evaluation(training_state, metrics)
+        # Log learning rates
+        if args.use_transformer:
+            step = training_state.gradient_steps.item()
+            metrics["training/learning_rate"] = actor_lr_schedule(step)
+        else:
+            metrics["training/learning_rate_actor"] = args.actor_lr
+            metrics["training/learning_rate_critic"] = args.critic_lr
 
-        metrics.update(get_gpu_memory_stats())
+        metrics = evaluator.run_evaluation(training_state, metrics)
 
         print(f"epoch {ne} out of {args.num_epochs} complete. metrics: {metrics}", flush=True)
 
