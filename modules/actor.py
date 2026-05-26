@@ -135,6 +135,8 @@ class SemanticTransformerActor(nn.Module):
             bias_init=bias_init,
             name='body_embed',
         )(body_raw)  # (batch, embed_dim)
+        body_token = nn.LayerNorm(name='body_ln')(body_token)
+
 
         # 8 hinge tokens, each (qpos_i, qvel_i) = 2 dims
         hinge_raw = jnp.stack([hinge_qpos, hinge_qvel], axis=-1)  # (batch, 8, 2)
@@ -144,6 +146,7 @@ class SemanticTransformerActor(nn.Module):
             bias_init=bias_init,
             name='hinge_embed',
         )(hinge_raw)  # (batch, 8, embed_dim)
+        hinge_tokens = nn.LayerNorm(name='hinge_ln')(hinge_tokens)
 
         # Goal token: 2 dims
         goal_token = nn.Dense(
