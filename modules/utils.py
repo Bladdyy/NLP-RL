@@ -72,7 +72,6 @@ class TransformerBackbone(nn.Module):
     mlp_ratio: int = 4
     num_patches: int = 8
     dropout_rate: float = 0.0
-    use_cls_token: bool = True
     pooling: str = "cls"  # "cls", "mean", or "flatten"
 
     @nn.compact
@@ -83,7 +82,7 @@ class TransformerBackbone(nn.Module):
             x = self._vector_to_sequence(x)
 
         # 2. Optional CLS token
-        if self.use_cls_token:
+        if self.pooling == "cls":
             cls_token = self.param(
                 'cls_token',
                 nn.initializers.normal(stddev=0.02),

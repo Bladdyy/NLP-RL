@@ -86,7 +86,6 @@ if __name__ == "__main__":
                 num_heads=args.transformer_num_heads,
                 mlp_ratio=args.transformer_mlp_ratio,
                 dropout_rate=args.transformer_dropout,
-                use_cls_token=bool(args.transformer_use_cls_token),
                 pooling=args.transformer_pooling,
             )
         elif args.tokenization == "per_dim":
@@ -97,7 +96,6 @@ if __name__ == "__main__":
                 num_heads=args.transformer_num_heads,
                 mlp_ratio=args.transformer_mlp_ratio,
                 dropout_rate=args.transformer_dropout,
-                use_cls_token=bool(args.transformer_use_cls_token),
                 pooling=args.transformer_pooling,
             )
         else:
@@ -109,7 +107,6 @@ if __name__ == "__main__":
                 mlp_ratio=args.transformer_mlp_ratio,
                 num_patches=args.transformer_num_patches,
                 dropout_rate=args.transformer_dropout,
-                use_cls_token=bool(args.transformer_use_cls_token),
                 pooling=args.transformer_pooling,
             )
     else:
@@ -138,7 +135,6 @@ if __name__ == "__main__":
                 num_heads=args.transformer_num_heads,
                 mlp_ratio=args.transformer_mlp_ratio,
                 dropout_rate=args.transformer_dropout,
-                use_cls_token=bool(args.transformer_use_cls_token),
                 pooling=args.transformer_pooling,
             )
             g_encoder = SemanticTransformerGEncoder(
@@ -147,7 +143,6 @@ if __name__ == "__main__":
                 num_heads=args.transformer_num_heads,
                 mlp_ratio=args.transformer_mlp_ratio,
                 dropout_rate=args.transformer_dropout,
-                use_cls_token=bool(args.transformer_use_cls_token),
                 pooling=args.transformer_pooling,
             )
         elif args.tokenization == "per_dim":
@@ -157,7 +152,6 @@ if __name__ == "__main__":
                 num_heads=args.transformer_num_heads,
                 mlp_ratio=args.transformer_mlp_ratio,
                 dropout_rate=args.transformer_dropout,
-                use_cls_token=bool(args.transformer_use_cls_token),
                 pooling=args.transformer_pooling,
             )
             g_encoder = PerDimTransformerGEncoder(
@@ -166,7 +160,6 @@ if __name__ == "__main__":
                 num_heads=args.transformer_num_heads,
                 mlp_ratio=args.transformer_mlp_ratio,
                 dropout_rate=args.transformer_dropout,
-                use_cls_token=bool(args.transformer_use_cls_token),
                 pooling=args.transformer_pooling,
             )
         else:
@@ -177,7 +170,6 @@ if __name__ == "__main__":
                 mlp_ratio=args.transformer_mlp_ratio,
                 num_patches=args.transformer_num_patches,
                 dropout_rate=args.transformer_dropout,
-                use_cls_token=bool(args.transformer_use_cls_token),
                 pooling=args.transformer_pooling,
             )
             g_encoder = TransformerGEncoder(
@@ -187,7 +179,6 @@ if __name__ == "__main__":
                 mlp_ratio=args.transformer_mlp_ratio,
                 num_patches=args.transformer_num_patches,
                 dropout_rate=args.transformer_dropout,
-                use_cls_token=bool(args.transformer_use_cls_token),
                 pooling=args.transformer_pooling,
             )
     else:

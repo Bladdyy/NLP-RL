@@ -77,7 +77,6 @@ class Args:
     transformer_mlp_ratio: int = 4
     transformer_num_patches: int = 8
     transformer_dropout: float = 0.0
-    transformer_use_cls_token: int = 1
     transformer_pooling: str = "cls"  # "cls", "mean", or "flatten"
     grad_clip_max_norm: float = 1.0
     transformer_lr: float = 3e-4

@@ -52,7 +52,6 @@ class TransformerSAEncoder(nn.Module):
     mlp_ratio: int = 4
     num_patches: int = 8
     dropout_rate: float = 0.0
-    use_cls_token: bool = True
     pooling: str = "cls"
 
     @nn.compact
@@ -65,7 +64,6 @@ class TransformerSAEncoder(nn.Module):
             mlp_ratio=self.mlp_ratio,
             num_patches=self.num_patches,
             dropout_rate=self.dropout_rate,
-            use_cls_token=self.use_cls_token,
             pooling=self.pooling,
         )(x)
 
@@ -124,7 +122,6 @@ class TransformerGEncoder(nn.Module):
     mlp_ratio: int = 4
     num_patches: int = 8
     dropout_rate: float = 0.0
-    use_cls_token: bool = True
     pooling: str = "cls"
 
     @nn.compact
@@ -136,7 +133,6 @@ class TransformerGEncoder(nn.Module):
             mlp_ratio=self.mlp_ratio,
             num_patches=self.num_patches,
             dropout_rate=self.dropout_rate,
-            use_cls_token=self.use_cls_token,
             pooling=self.pooling,
         )(g)
 
@@ -163,7 +159,6 @@ class SemanticTransformerSAEncoder(nn.Module):
     num_heads: int = 4
     mlp_ratio: int = 4
     dropout_rate: float = 0.0
-    use_cls_token: bool = True
     pooling: str = "cls"
 
     @nn.compact
@@ -220,7 +215,6 @@ class SemanticTransformerSAEncoder(nn.Module):
             mlp_ratio=self.mlp_ratio,
             num_patches=0,  # unused when input is 3D
             dropout_rate=self.dropout_rate,
-            use_cls_token=self.use_cls_token,
             pooling=self.pooling,
         )(tokens)
 
@@ -240,7 +234,6 @@ class SemanticTransformerGEncoder(nn.Module):
     num_heads: int = 4
     mlp_ratio: int = 4
     dropout_rate: float = 0.0
-    use_cls_token: bool = True
     pooling: str = "cls"
 
     @nn.compact
@@ -265,7 +258,6 @@ class SemanticTransformerGEncoder(nn.Module):
             mlp_ratio=self.mlp_ratio,
             num_patches=0,  # unused when input is 3D
             dropout_rate=self.dropout_rate,
-            use_cls_token=self.use_cls_token,
             pooling=self.pooling,
         )(tokens)
 
@@ -286,7 +278,6 @@ class PerDimTransformerSAEncoder(nn.Module):
     num_heads: int = 4
     mlp_ratio: int = 4
     dropout_rate: float = 0.0
-    use_cls_token: bool = True
     pooling: str = "cls"
 
     @nn.compact
@@ -312,7 +303,6 @@ class PerDimTransformerSAEncoder(nn.Module):
             mlp_ratio=self.mlp_ratio,
             num_patches=0,
             dropout_rate=self.dropout_rate,
-            use_cls_token=self.use_cls_token,
             pooling=self.pooling,
         )(tokens)
 
@@ -330,7 +320,6 @@ class PerDimTransformerGEncoder(nn.Module):
     num_heads: int = 4
     mlp_ratio: int = 4
     dropout_rate: float = 0.0
-    use_cls_token: bool = True
     pooling: str = "cls"
 
     @nn.compact
@@ -354,7 +343,6 @@ class PerDimTransformerGEncoder(nn.Module):
             mlp_ratio=self.mlp_ratio,
             num_patches=0,
             dropout_rate=self.dropout_rate,
-            use_cls_token=self.use_cls_token,
             pooling=self.pooling,
         )(tokens)
 

@@ -61,7 +61,6 @@ class TransformerActor(nn.Module):
     mlp_ratio: int = 4
     num_patches: int = 8
     dropout_rate: float = 0.0
-    use_cls_token: bool = True
     pooling: str = "cls"
     LOG_STD_MAX = 2
     LOG_STD_MIN = -5
@@ -75,7 +74,6 @@ class TransformerActor(nn.Module):
             mlp_ratio=self.mlp_ratio,
             num_patches=self.num_patches,
             dropout_rate=self.dropout_rate,
-            use_cls_token=self.use_cls_token,
             pooling=self.pooling,
         )(x)
 
@@ -108,7 +106,6 @@ class SemanticTransformerActor(nn.Module):
     num_heads: int = 4
     mlp_ratio: int = 4
     dropout_rate: float = 0.0
-    use_cls_token: bool = True
     pooling: str = "cls"
     LOG_STD_MAX = 2
     LOG_STD_MIN = -5
@@ -172,7 +169,6 @@ class SemanticTransformerActor(nn.Module):
             mlp_ratio=self.mlp_ratio,
             num_patches=0,
             dropout_rate=self.dropout_rate,
-            use_cls_token=self.use_cls_token,
             pooling=self.pooling,
         )(tokens)
 
@@ -199,7 +195,6 @@ class PerDimTransformerActor(nn.Module):
     num_heads: int = 4
     mlp_ratio: int = 4
     dropout_rate: float = 0.0
-    use_cls_token: bool = True
     pooling: str = "cls"
     LOG_STD_MAX = 2
     LOG_STD_MIN = -5
@@ -226,7 +221,6 @@ class PerDimTransformerActor(nn.Module):
             mlp_ratio=self.mlp_ratio,
             num_patches=0,
             dropout_rate=self.dropout_rate,
-            use_cls_token=self.use_cls_token,
             pooling=self.pooling,
         )(tokens)
 
