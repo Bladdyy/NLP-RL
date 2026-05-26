@@ -67,6 +67,7 @@ class Args:
     
     entropy_param: float = 0.5
     disable_entropy: int = 0
+    loss_temperature: float = 0.1
     use_relu: int = 0
     use_transformer: int = 0
     tokenization: str = "patches"  # "patches", "semantic", or "per_dim"

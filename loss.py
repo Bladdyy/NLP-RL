@@ -29,8 +29,13 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         sa_encoder_params, g_encoder_params = critic_params["sa_encoder"], critic_params["g_encoder"]
         sa_repr = sa_encoder.apply(sa_encoder_params, state, action)
         g_repr = g_encoder.apply(g_encoder_params, goal)
+        
+        sa_repr_norm = sa_repr / (jnp.linalg.norm(sa_repr, axis=-1, keepdims=True) + 1e-6)
+        g_repr_norm = g_repr / (jnp.linalg.norm(g_repr, axis=-1, keepdims=True) + 1e-6)
 
-        qf_pi = -jnp.sqrt(jnp.sum((sa_repr - g_repr) ** 2, axis=-1))
+        distances = -jnp.sqrt(jnp.sum((sa_repr_norm - g_repr_norm) ** 2, axis=-1))
+
+        qf_pi = distances / args.loss_temperature
 
         if args.disable_entropy:
             actor_loss = -jnp.mean(qf_pi)
@@ -56,8 +61,14 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         sa_repr = sa_encoder.apply(sa_encoder_params, obs, action)
         g_repr = g_encoder.apply(g_encoder_params, transitions.observation[:, args.obs_dim:])
             
+        sa_repr_norm = sa_repr / (jnp.linalg.norm(sa_repr, axis=-1, keepdims=True) + 1e-6)
+        g_repr_norm = g_repr / (jnp.linalg.norm(g_repr, axis=-1, keepdims=True) + 1e-6)
+
+        distances = jnp.sqrt(jnp.sum((sa_repr_norm[:, None, :] - g_repr_norm[None, :, :]) ** 2, axis=-1))
+
+        logits = -distances / args.loss_temperature
+
         # InfoNCE
-        logits = -jnp.sqrt(jnp.sum((sa_repr[:, None, :] - g_repr[None, :, :]) ** 2, axis=-1))       # shape = BxB
         critic_loss = -jnp.mean(jnp.diag(logits) - jax.nn.logsumexp(logits, axis=1))
 
         # logsumexp regularisation

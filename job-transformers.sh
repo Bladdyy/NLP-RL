@@ -39,7 +39,8 @@ uv run main.py \
   --tokenization semantic \
   --grad_clip_max_norm 1.0 \
   --transformer_lr 1e-4 \
-  --transformer_weight_decay 1e-4
+  --transformer_weight_decay 1e-4 \
+  --loss_temperature 0.1
 
  echo "Finished"
                    
