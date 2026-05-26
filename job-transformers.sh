@@ -35,11 +35,11 @@ uv run main.py \
   --transformer_mlp_ratio 4 \
   --transformer_num_patches 8 \
   --transformer_dropout 0.0 \
-  --transformer_pooling flatten \
-  --tokenization per_dim \
+  --transformer_pooling cls \
+  --tokenization semantic \
   --grad_clip_max_norm 1.0 \
   --transformer_lr 1e-4 \
-  --transformer_weight_decay 0.0
+  --transformer_weight_decay 1e-4
 
  echo "Finished"
                    
