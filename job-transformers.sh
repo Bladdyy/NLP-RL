@@ -27,7 +27,7 @@ uv run main.py \
   --num_envs 512 \
   --batch_size 512 \
   --min_replay_size 1000 \
-  --max_replay_size 1_000_000 \
+  --max_replay_size 100_000 \
   --use_transformer  1 \
   --transformer_embed_dim 144\
   --transformer_num_layers 2 \
