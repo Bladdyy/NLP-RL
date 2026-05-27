@@ -42,6 +42,7 @@ class TransformerBlock(nn.Module):
             out_features=self.embed_dim,
             dropout_rate=self.dropout_rate,
         )(inputs_q=x, inputs_kv=x, deterministic=deterministic)
+        x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
         x = residual + x
 
         # Pre-LN FFN
@@ -49,7 +50,9 @@ class TransformerBlock(nn.Module):
         x = nn.LayerNorm()(x)
         x = nn.Dense(self.mlp_dim)(x)
         x = nn.swish(x)
+        x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
         x = nn.Dense(self.embed_dim)(x)
+        x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
         x = residual + x
 
         return x

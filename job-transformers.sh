@@ -27,14 +27,14 @@ uv run main.py \
   --num_envs 512 \
   --batch_size 512 \
   --min_replay_size 1000 \
-  --max_replay_size 10_000 \
+  --max_replay_size 1_000_000 \
   --use_transformer  1 \
   --transformer_embed_dim 144\
   --transformer_num_layers 2 \
   --transformer_num_heads 4 \
   --transformer_mlp_ratio 4 \
   --transformer_num_patches 8 \
-  --transformer_dropout 0.0 \
+  --transformer_dropout 0.1 \
   --transformer_pooling cls \
   --tokenization semantic \
   --grad_clip_max_norm 15.0 \
