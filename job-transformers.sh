@@ -37,10 +37,11 @@ uv run main.py \
   --transformer_dropout 0.0 \
   --transformer_pooling cls \
   --tokenization semantic \
-  --grad_clip_max_norm 2.0 \
+  --grad_clip_max_norm 15.0 \
   --transformer_lr 1e-4 \
-  --transformer_weight_decay 1e-4 \
-  --loss_temperature 0.1
+  --transformer_weight_decay 1e-2 \
+  --loss_temperature 0.1 \
+  --entropy_param 1.0
 
  echo "Finished"
                    
