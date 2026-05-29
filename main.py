@@ -63,11 +63,22 @@ if __name__ == "__main__":
         tx=optax.adam(learning_rate=args.actor_lr)
     )
 
+
     # Critic
     if args.transformer_critic:
-        sa_encoder = SA_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu)
-        g_encoder = G_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu)
-    
+        # Tokenization and pooling strategy for transformer critic
+        token_mode = args.token_mode
+        pooling_type = args.pooling_type
+        if "semantic" in token_mode:
+            if "ant" in args.env_id:
+                token_mode = "semantic_ant"
+            elif "humanoid" in args.env_id:
+                token_mode = "semantic_humanoid"
+            else:
+                raise ValueError(f"Unknown env token_mode for: {args.env_id}")
+        sa_encoder = SA_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu, token_mode=token_mode, pooling_type=pooling_type)
+        g_encoder = G_TransformerEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu, pooling_type=pooling_type)
+
     else:
         sa_encoder = SA_MlpEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu)
         g_encoder = G_MlpEncoder(network_width=args.critic_network_width, network_depth=args.critic_depth, use_relu=args.use_relu)

@@ -27,8 +27,8 @@ class SA_TransformerEncoder(nn.Module):
     num_heads: int = 4
     use_relu: int = 0
     norm_type = "layer_norm"
-    token_mode: str = "semantic_batch"  # "flatten", "two_tokens", or "semantic_batch"
-    pooling_type: str = "cls"  # "attention" or "cls"
+    token_mode: str = "two_tokens"
+    pooling_type: str = "cls"
 
     @nn.compact
     def __call__(self, s: jnp.ndarray, a: jnp.ndarray):
@@ -60,7 +60,7 @@ class SA_TransformerEncoder(nn.Module):
             action_token = action_token + action_type
             tokens = jnp.concatenate([state_token, action_token], axis=1)
         
-        elif self.token_mode == "semantic_batch":
+        elif self.token_mode == "semantic_ant":
             # Parse 29-dim state (ant):
             #   [0:7]   = root qpos
             #   [7:15]  = hinge qpos
@@ -86,6 +86,8 @@ class SA_TransformerEncoder(nn.Module):
 
             # Assemble token sequence
             tokens = jnp.concatenate([body_token, hinge_tokens], axis=1)
+        elif self.token_mode == "semantic_humanoid":
+            pass
         else:
             raise ValueError(f"Unknown token_mode: {self.token_mode}")
 
