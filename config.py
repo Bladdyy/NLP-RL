@@ -43,8 +43,8 @@ class Args:
     unroll_length: int  = 62
 
     transformer_critic: bool = False
-    token_mode: str = "semantic_batch"  # "flatten", "two_tokens", "semantic_ant" or "semantic_humanoid"
-    pooling_type: str = "cls"  # "attention" or "cls"
+    token_mode: str = "semantic_batch"  # "flatten", "two_tokens", "semantic"
+    pooling_type: str = "cls"  # "attention", "mean" or "cls"
 
     critic_network_width: int = 256
     actor_network_width: int = 256

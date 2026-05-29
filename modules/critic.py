@@ -61,33 +61,72 @@ class SA_TransformerEncoder(nn.Module):
             tokens = jnp.concatenate([state_token, action_token], axis=1)
         
         elif self.token_mode == "semantic_ant":
-            # Parse 29-dim state (ant):
-            #   [0:7]   = root qpos
-            #   [7:15]  = hinge qpos
-            #   [15:21] = root qvel
-            #   [21:29] = hinge qvel
-            root_qpos = s[..., :7]
-            hinge_qpos = s[..., 7:15]
-            root_qvel = s[..., 15:21]
-            hinge_qvel = s[..., 21:29]
+            body_qpos = s[..., :7]
+            body_qvel = s[..., 15:21]
 
-            # Reorder action to match qpos/qvel hinge order
-            action_reorder = jnp.array([2, 3, 4, 5, 6, 7, 0, 1])
-            a = a[..., action_reorder]
-
-            # Body token: root qpos + root qvel
-            body_raw = jnp.concatenate([root_qpos, root_qvel], axis=-1)
+            body_raw = jnp.concatenate([body_qpos, body_qvel], axis=-1)
             body_token = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init, name='body_embed')(body_raw)
             body_token = jnp.expand_dims(body_token, axis=1)
 
-            # Build 8 hinge tokens
-            hinge_raw = jnp.stack([hinge_qpos, hinge_qvel, a], axis=-1)
+            # Reorder action to match qpos/qvel joint order
+            action_reorder = jnp.array([2, 3, 4, 5, 6, 7, 0, 1])
+            a = a[..., action_reorder]
+            
+            joint_qpos = s[..., 7:15]
+            joint_qvel = s[..., 21:29]
+
+            hinge_raw = jnp.stack([joint_qpos, joint_qvel, a], axis=-1)
             hinge_tokens = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init, name='hinge_embed')(hinge_raw)
 
-            # Assemble token sequence
             tokens = jnp.concatenate([body_token, hinge_tokens], axis=1)
+
         elif self.token_mode == "semantic_humanoid":
-            pass
+            torso_qpos = s[..., 0:7]
+            torso_qvel = s[..., 26:32]
+
+            torso = jnp.concatenate([torso_qpos, torso_qvel], axis=-1)
+            torso_token = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init, name='torso_embed')(torso)
+            torso_token = jnp.expand_dims(torso_token, axis=1)
+
+            # abdomen: swap y,z → z,y
+            action_reorder = jnp.array([1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+            joint_a = a[..., action_reorder]
+            joint_qpos = s[..., 7:24] 
+            joint_qvel = s[..., 32:49]
+
+            joint_raw = jnp.stack([joint_qpos, joint_qvel, joint_a], axis=-1)
+            joint_tokens = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init, name='joint_embed')(joint_raw)
+
+            # COM inertia
+            com_inertia = s[..., 51:171]
+            com_inertia_token = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init, name='com_inertia_embed')(com_inertia)
+            com_inertia_token = jnp.expand_dims(com_inertia_token, axis=1)
+
+            # COM velocity
+            com_vel  = s[..., 171:243]
+            com_vel_token = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init, name='com_vel_embed')(com_vel)
+            com_vel_token = jnp.expand_dims(com_vel_token, axis=1)
+
+            # Cumulated actuator forces
+            qfrc = s[..., 243:268]
+            qfrc_token = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init, name='qfrc_embed')(qfrc)
+            qfrc_token = jnp.expand_dims(qfrc_token, axis=1)
+
+            # target slides
+            target_qpos = s[..., 24:26]
+            target_qvel = s[..., 49:51]
+            target_raw = jnp.concatenate([target_qpos, target_qvel], axis=-1)
+            target_token = nn.Dense(self.network_width, kernel_init=lecun_uniform, bias_init=bias_init, name='target_slides_embed')(target_raw)
+            target_token = jnp.expand_dims(target_token, axis=1)
+
+            tokens = jnp.concatenate([
+                torso_token,
+                joint_tokens,
+                com_inertia_token,
+                com_vel_token,
+                qfrc_token,
+                target_token,
+            ], axis=1)
         else:
             raise ValueError(f"Unknown token_mode: {self.token_mode}")
 
@@ -111,10 +150,15 @@ class SA_TransformerEncoder(nn.Module):
 
         if self.pooling_type == "cls":
             x = x[:, 0, :]
-        else:
+        elif self.pooling_type == "attention":
             attn_logits = nn.Dense(1)(x)          
             attn_weights = jax.nn.softmax(attn_logits, axis=1) 
             x = jnp.sum(x * attn_weights, axis=1)
+        elif self.pooling_type == "mean":
+            x = jnp.mean(x, axis=1)
+        else:
+            raise ValueError(f"Unknown pooling_type: {self.pooling_type}")
+
         
         x = nn.Dense(64, kernel_init=lecun_uniform, bias_init=bias_init)(x)
 
