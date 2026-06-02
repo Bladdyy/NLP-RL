@@ -28,7 +28,7 @@ uv run main.py \
   --batch_size 512 \
   --min_replay_size 1000 \
   --max_replay_size 100_000 \
-  --use_transformer  StateActor \
+  --transformer_mode StateActor \
   --transformer_embed_dim 144\
   --transformer_num_layers 2 \
   --transformer_num_heads 4 \
