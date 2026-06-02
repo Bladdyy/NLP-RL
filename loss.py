@@ -30,13 +30,14 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         sa_repr = sa_encoder.apply(sa_encoder_params, state, action)
         g_repr = g_encoder.apply(g_encoder_params, goal)
         
-        sa_repr_norm = sa_repr / (jnp.linalg.norm(sa_repr, axis=-1, keepdims=True) + 1e-6)
-        g_repr_norm = g_repr / (jnp.linalg.norm(g_repr, axis=-1, keepdims=True) + 1e-6)
+        #sa_repr_norm = sa_repr / (jnp.linalg.norm(sa_repr, axis=-1, keepdims=True) + 1e-6)
+        #g_repr_norm = g_repr / (jnp.linalg.norm(g_repr, axis=-1, keepdims=True) + 1e-6)
 
-        distances = -jnp.sqrt(jnp.sum((sa_repr_norm - g_repr_norm) ** 2, axis=-1))
+        #distances = -jnp.sqrt(jnp.sum((sa_repr_norm - g_repr_norm) ** 2, axis=-1))
+        
+        #qf_pi = distances / args.loss_temperature
 
-        qf_pi = distances / args.loss_temperature
-
+        qf_pi = -jnp.sqrt(jnp.sum((sa_repr - g_repr) ** 2, axis=-1))
         if args.disable_entropy:
             actor_loss = -jnp.mean(qf_pi)
         else:
@@ -61,12 +62,14 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         sa_repr = sa_encoder.apply(sa_encoder_params, obs, action)
         g_repr = g_encoder.apply(g_encoder_params, transitions.observation[:, args.obs_dim:])
             
-        sa_repr_norm = sa_repr / (jnp.linalg.norm(sa_repr, axis=-1, keepdims=True) + 1e-6)
-        g_repr_norm = g_repr / (jnp.linalg.norm(g_repr, axis=-1, keepdims=True) + 1e-6)
+        #sa_repr_norm = sa_repr / (jnp.linalg.norm(sa_repr, axis=-1, keepdims=True) + 1e-6)
+        #g_repr_norm = g_repr / (jnp.linalg.norm(g_repr, axis=-1, keepdims=True) + 1e-6)
 
-        distances = jnp.sqrt(jnp.sum((sa_repr_norm[:, None, :] - g_repr_norm[None, :, :]) ** 2, axis=-1))
+        #distances = jnp.sqrt(jnp.sum((sa_repr_norm[:, None, :] - g_repr_norm[None, :, :]) ** 2, axis=-1))
 
-        logits = -distances / args.loss_temperature
+        #logits = -distances / args.loss_temperature
+        
+        logits = jnp.sqrt(jnp.sum((sa_repr[:, None, :] - g_repr[None, :, :]) ** 2, axis=-1))
 
         # InfoNCE
         critic_loss = -jnp.mean(jnp.diag(logits) - jax.nn.logsumexp(logits, axis=1))
