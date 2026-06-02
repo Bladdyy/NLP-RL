@@ -27,17 +27,10 @@ if __name__ == "__main__":
     print(f"obs_size: {obs_size}, action_size: {action_size}, goal_dim: {goal_dim}")
     print("\n--- Model Parameter Counts ---")
 
-    if args.use_transformer:
+    sa_is_transformer = args.transformer_mode in ("Full", "State", "StateGoal", "StateActor")
+    g_is_transformer = args.transformer_mode in ("Full", "StateGoal")
+    if sa_is_transformer:
         sa_encoder = TransformerSAEncoder(
-            embed_dim=args.transformer_embed_dim,
-            num_layers=args.transformer_num_layers,
-            num_heads=args.transformer_num_heads,
-            mlp_ratio=args.transformer_mlp_ratio,
-            num_patches=args.transformer_num_patches,
-            dropout_rate=args.transformer_dropout,
-            use_cls_token=bool(args.transformer_use_cls_token),
-        )
-        g_encoder = TransformerGEncoder(
             embed_dim=args.transformer_embed_dim,
             num_layers=args.transformer_num_layers,
             num_heads=args.transformer_num_heads,
@@ -53,6 +46,17 @@ if __name__ == "__main__":
             skip_connections=args.critic_skip_connections,
             use_relu=args.use_relu,
         )
+    if g_is_transformer:
+        g_encoder = TransformerGEncoder(
+            embed_dim=args.transformer_embed_dim,
+            num_layers=args.transformer_num_layers,
+            num_heads=args.transformer_num_heads,
+            mlp_ratio=args.transformer_mlp_ratio,
+            num_patches=args.transformer_num_patches,
+            dropout_rate=args.transformer_dropout,
+            use_cls_token=bool(args.transformer_use_cls_token),
+        )
+    else:
         g_encoder = G_encoder(
             network_width=args.critic_network_width,
             network_depth=args.critic_depth,
@@ -63,12 +67,12 @@ if __name__ == "__main__":
     dummy_obs = jnp.ones([1, obs_size])
     dummy_act = jnp.ones([1, action_size])
     sa_params = sa_encoder.init(key, dummy_obs, dummy_act)["params"]
-    model_name = "SA_TransformerEncoder" if args.use_transformer else "SA_MlpEncoder"
+    model_name = "SA_TransformerEncoder" if sa_is_transformer else "SA_MlpEncoder"
     print_param_count(model_name, sa_params)
 
     dummy_goal = jnp.ones([1, goal_dim])
     g_params = g_encoder.init(key, dummy_goal)["params"]
-    model_name = "G_TransformerEncoder" if args.use_transformer else "G_MlpEncoder"
+    model_name = "G_TransformerEncoder" if g_is_transformer else "G_MlpEncoder"
     print_param_count(model_name, g_params)
 
     print("-------------------------------\n")

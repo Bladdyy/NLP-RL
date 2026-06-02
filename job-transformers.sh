@@ -2,7 +2,7 @@
 #
 #SBATCH --job-name=crl-transformer
 #SBATCH --partition=a100
-#SBATCH --qos=jh479001_a100
+#SBATCH --qos=ok479034_a100
 #SBATCH --gres=gpu:1
 #SBATCH --output=logs/slurm-crl-transformer.txt
 #SBATCH --error=logs/slurm-crl-transformer-error.txt
@@ -20,15 +20,15 @@ uv run main.py \
   --total_env_steps 100_000_000 \
   --critic_depth 8 \
   --actor_depth 8 \
-  --actor_skip_connections 4 \
-  --critic_skip_connections 4 \
+  --critic_network_width 256 \
+  --actor_network_width 256 \
   --vis_length 1000  \
   --save_buffer 0  \
   --num_envs 512 \
   --batch_size 512 \
   --min_replay_size 1000 \
   --max_replay_size 100_000 \
-  --use_transformer  1 \
+  --use_transformer  StateActor \
   --transformer_embed_dim 144\
   --transformer_num_layers 2 \
   --transformer_num_heads 4 \

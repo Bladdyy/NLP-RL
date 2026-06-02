@@ -41,6 +41,43 @@ def make_transformer_optimizer(learning_rate, weight_decay, max_norm, params, wa
     )
     return optimizer, lr_schedule
 
+_TRANSFORMER_CLASSES = {
+    "actor": {
+        "semantic": SemanticTransformerActor,
+        "per_dim": PerDimTransformerActor,
+        "patches": TransformerActor,
+    },
+    "sa_encoder": {
+        "semantic": SemanticTransformerSAEncoder,
+        "per_dim": PerDimTransformerSAEncoder,
+        "patches": TransformerSAEncoder,
+    },
+    "g_encoder": {
+        "semantic": SemanticTransformerGEncoder,
+        "per_dim": PerDimTransformerGEncoder,
+        "patches": TransformerGEncoder,
+    },
+}
+
+
+def _make_transformer(component, *, action_size=None):
+    """Create a transformer network for the given component using the configured tokenization."""
+    cls = _TRANSFORMER_CLASSES[component][args.tokenization]
+    kwargs = dict(
+        embed_dim=args.transformer_embed_dim,
+        num_layers=args.transformer_num_layers,
+        num_heads=args.transformer_num_heads,
+        mlp_ratio=args.transformer_mlp_ratio,
+        dropout_rate=args.transformer_dropout,
+        pooling=args.transformer_pooling,
+    )
+    if action_size is not None:
+        kwargs["action_size"] = action_size
+    if args.tokenization == "patches":
+        kwargs["num_patches"] = args.transformer_num_patches
+    return cls(**kwargs)
+
+
 if __name__ == "__main__":
 
     print("Starting training script...", flush=True)
@@ -77,43 +114,14 @@ if __name__ == "__main__":
     # Actor and critic setup ----------------------------------------------------------------------------------------------------------------------------------
 
     # Actor
-    if args.use_transformer:
-        if args.tokenization == "semantic":
-            actor = SemanticTransformerActor(
-                action_size=action_size,
-                embed_dim=args.transformer_embed_dim,
-                num_layers=args.transformer_num_layers,
-                num_heads=args.transformer_num_heads,
-                mlp_ratio=args.transformer_mlp_ratio,
-                dropout_rate=args.transformer_dropout,
-                pooling=args.transformer_pooling,
-            )
-        elif args.tokenization == "per_dim":
-            actor = PerDimTransformerActor(
-                action_size=action_size,
-                embed_dim=args.transformer_embed_dim,
-                num_layers=args.transformer_num_layers,
-                num_heads=args.transformer_num_heads,
-                mlp_ratio=args.transformer_mlp_ratio,
-                dropout_rate=args.transformer_dropout,
-                pooling=args.transformer_pooling,
-            )
-        else:
-            actor = TransformerActor(
-                action_size=action_size,
-                embed_dim=args.transformer_embed_dim,
-                num_layers=args.transformer_num_layers,
-                num_heads=args.transformer_num_heads,
-                mlp_ratio=args.transformer_mlp_ratio,
-                num_patches=args.transformer_num_patches,
-                dropout_rate=args.transformer_dropout,
-                pooling=args.transformer_pooling,
-            )
+    actor_is_transformer = args.transformer_mode in ("Full", "StateActor")
+    if actor_is_transformer:
+        actor = _make_transformer("actor", action_size=action_size)
     else:
         actor = Actor(action_size=action_size, network_width=args.actor_network_width, network_depth=args.actor_depth, skip_connections=args.actor_skip_connections, use_relu=args.use_relu)
     actor_params = actor.init(actor_key, np.ones([1, obs_size]))
     actor_lr_schedule = None
-    if args.use_transformer:
+    if actor_is_transformer:
         actor_tx, actor_lr_schedule = make_transformer_optimizer(
             args.transformer_lr, args.transformer_weight_decay,
             args.grad_clip_max_norm, actor_params
@@ -127,62 +135,15 @@ if __name__ == "__main__":
     )
 
     # Critic
-    if args.use_transformer:
-        if args.tokenization == "semantic":
-            sa_encoder = SemanticTransformerSAEncoder(
-                embed_dim=args.transformer_embed_dim,
-                num_layers=args.transformer_num_layers,
-                num_heads=args.transformer_num_heads,
-                mlp_ratio=args.transformer_mlp_ratio,
-                dropout_rate=args.transformer_dropout,
-                pooling=args.transformer_pooling,
-            )
-            g_encoder = SemanticTransformerGEncoder(
-                embed_dim=args.transformer_embed_dim,
-                num_layers=args.transformer_num_layers,
-                num_heads=args.transformer_num_heads,
-                mlp_ratio=args.transformer_mlp_ratio,
-                dropout_rate=args.transformer_dropout,
-                pooling=args.transformer_pooling,
-            )
-        elif args.tokenization == "per_dim":
-            sa_encoder = PerDimTransformerSAEncoder(
-                embed_dim=args.transformer_embed_dim,
-                num_layers=args.transformer_num_layers,
-                num_heads=args.transformer_num_heads,
-                mlp_ratio=args.transformer_mlp_ratio,
-                dropout_rate=args.transformer_dropout,
-                pooling=args.transformer_pooling,
-            )
-            g_encoder = PerDimTransformerGEncoder(
-                embed_dim=args.transformer_embed_dim,
-                num_layers=args.transformer_num_layers,
-                num_heads=args.transformer_num_heads,
-                mlp_ratio=args.transformer_mlp_ratio,
-                dropout_rate=args.transformer_dropout,
-                pooling=args.transformer_pooling,
-            )
-        else:
-            sa_encoder = TransformerSAEncoder(
-                embed_dim=args.transformer_embed_dim,
-                num_layers=args.transformer_num_layers,
-                num_heads=args.transformer_num_heads,
-                mlp_ratio=args.transformer_mlp_ratio,
-                num_patches=args.transformer_num_patches,
-                dropout_rate=args.transformer_dropout,
-                pooling=args.transformer_pooling,
-            )
-            g_encoder = TransformerGEncoder(
-                embed_dim=args.transformer_embed_dim,
-                num_layers=args.transformer_num_layers,
-                num_heads=args.transformer_num_heads,
-                mlp_ratio=args.transformer_mlp_ratio,
-                num_patches=args.transformer_num_patches,
-                dropout_rate=args.transformer_dropout,
-                pooling=args.transformer_pooling,
-            )
+    sa_is_transformer = args.transformer_mode in ("Full", "State", "StateGoal", "StateActor")
+    g_is_transformer = args.transformer_mode in ("Full", "StateGoal")
+    if sa_is_transformer:
+        sa_encoder = _make_transformer("sa_encoder")
     else:
         sa_encoder = SA_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+    if g_is_transformer:
+        g_encoder = _make_transformer("g_encoder")
+    else:
         g_encoder = G_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
     sa_encoder_params = sa_encoder.init(sa_key, np.ones([1, args.obs_dim]), np.ones([1, action_size]))
     g_encoder_params = g_encoder.init(g_key, np.ones([1, args.goal_end_idx - args.goal_start_idx]))
@@ -192,7 +153,8 @@ if __name__ == "__main__":
     }
 
     critic_lr_schedule = None
-    if args.use_transformer:
+    critic_any_transformer = sa_is_transformer or g_is_transformer
+    if critic_any_transformer:
         critic_tx, critic_lr_schedule = make_transformer_optimizer(
             args.transformer_lr, args.transformer_weight_decay,
             args.grad_clip_max_norm, critic_params
@@ -334,7 +296,7 @@ if __name__ == "__main__":
         }
 
         # Log learning rates
-        if args.use_transformer:
+        if actor_is_transformer:
             step = training_state.gradient_steps.item()
             metrics["training/learning_rate"] = actor_lr_schedule(step)
         else:

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Literal
 
 @dataclass
 class Args:
@@ -69,9 +70,9 @@ class Args:
     disable_entropy: int = 0
     loss_temperature: float = 0.1
     use_relu: int = 0
-    use_transformer: int = 0
+    transformer_mode: Literal["none", "Full", "State", "StateGoal", "StateActor"] = "none"
     tokenization: str = "patches"  # "patches", "semantic", or "per_dim"
-    # Transformer-specific config (only used when use_transformer = 1)
+    # Transformer-specific config (only used when transformer_mode != "none")
     transformer_embed_dim: int = 144
     transformer_num_layers: int = 4
     transformer_num_heads: int = 4
