@@ -69,7 +69,7 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
 
         #logits = -distances / args.loss_temperature
         
-        logits = jnp.sqrt(jnp.sum((sa_repr[:, None, :] - g_repr[None, :, :]) ** 2, axis=-1))
+        logits = -jnp.sqrt(jnp.sum((sa_repr[:, None, :] - g_repr[None, :, :]) ** 2, axis=-1))
 
         # InfoNCE
         critic_loss = -jnp.mean(jnp.diag(logits) - jax.nn.logsumexp(logits, axis=1))
