@@ -1,5 +1,6 @@
 import flax.linen as nn
 from flax.linen.initializers import variance_scaling
+import jax
 import jax.numpy as jnp
 
 lecun_uniform = variance_scaling(1/3, "fan_in", "uniform")
@@ -85,3 +86,17 @@ class TransformerEncoder(nn.Module):
             )(x)
 
         return x
+
+
+def apply_pooling(x, pooling_type):
+    if pooling_type == "cls":
+        x = x[:, 0, :]
+    elif pooling_type == "attention":
+        attn_logits = nn.Dense(1)(x)          
+        attn_weights = jax.nn.softmax(attn_logits, axis=1) 
+        x = jnp.sum(x * attn_weights, axis=1)
+    elif pooling_type == "mean":
+        x = jnp.mean(x, axis=1)
+    else:
+        raise ValueError(f"Unknown pooling_type: {pooling_type}")
+    return x

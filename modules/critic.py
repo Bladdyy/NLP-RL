@@ -1,9 +1,8 @@
 import flax.linen as nn
 from flax.linen.initializers import variance_scaling
-import jax
 import jax.numpy as jnp
 
-from modules.utils import residual_block, TransformerEncoder
+from modules.utils import residual_block, TransformerEncoder, apply_pooling
 
 lecun_uniform = variance_scaling(1/3, "fan_in", "uniform")
 bias_init = nn.initializers.zeros
@@ -148,17 +147,8 @@ class SA_TransformerEncoder(nn.Module):
             norm_type=self.norm_type,
         )(x)
 
-        if self.pooling_type == "cls":
-            x = x[:, 0, :]
-        elif self.pooling_type == "attention":
-            attn_logits = nn.Dense(1)(x)          
-            attn_weights = jax.nn.softmax(attn_logits, axis=1) 
-            x = jnp.sum(x * attn_weights, axis=1)
-        elif self.pooling_type == "mean":
-            x = jnp.mean(x, axis=1)
-        else:
-            raise ValueError(f"Unknown pooling_type: {self.pooling_type}")
 
+        x = apply_pooling(x, self.pooling_type)
         
         x = nn.Dense(64, kernel_init=lecun_uniform, bias_init=bias_init)(x)
 
@@ -202,14 +192,7 @@ class G_TransformerEncoder(nn.Module):
             norm_type=self.norm_type,
         )(goal_tokens)
 
-        # Pooling
-        if self.pooling_type == "cls":
-            x = x[:, 0, :]
-        else:
-            attn_logits = nn.Dense(1)(x)     
-            attn_weights = jax.nn.softmax(attn_logits, axis=1) 
-            x = jnp.sum(x * attn_weights, axis=1)
-
+        x = apply_pooling(x, self.pooling_type)
         # Output head
         x = nn.Dense(64, kernel_init=lecun_uniform, bias_init=bias_init)(x)
 
