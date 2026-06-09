@@ -187,3 +187,26 @@ uv run main.py \
 
  echo "Finished"
 ```
+
+
+# Transformers for NLP
+To run transformers look at job-transformers.sh, it contains most of the important options that are available. Most important options:
+
+- Pooling (transformer_pooling):
+    1. cls - a learned cls token prepended to the sequence, probably the best approach
+    2. mean - taking the mean of the tokens
+    3. flatten - flattening the tokens and downsampling with a dense layer.
+-  Tokenization (tokenization):
+    1. patches - naive split into patches
+    2. semantic - smart one, where each joint is a token + 1 token for body
+    3. per_dim - every observation and action dimension is one token
+- Transformer mode (transformer_mode):
+    1. None - MLP
+    2. State - only SA encoder is transformer
+    3. StateGoal - whole critic is transformer
+    4. StateActor - SA encoder and actor are transformer
+    5. Full - all networks are transformers
+
+
+## Code layout
+Most of the basic transformer code is in modules/ directory, with utils having the base transformer block class.
