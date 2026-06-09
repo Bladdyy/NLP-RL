@@ -2,6 +2,7 @@ import flax.linen as nn
 from flax.linen.initializers import variance_scaling
 import jax.numpy as jnp
 from modules.utils import residual_block, TransformerBackbone
+from modules.frozen_text_encoder import FrozenSentenceBertGoalEncoder
 
 class SA_encoder(nn.Module):
     norm_type = "layer_norm"
@@ -224,6 +225,25 @@ class SemanticTransformerSAEncoder(nn.Module):
         x = nn.Dense(64, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
         return x
 
+
+class SemanticTransformerGEncoderText(nn.Module):
+    """
+    Goal encoder using frozen Sentence-BERT text encoding.
+ 
+    Converts the 2-dim goal (x, y) into the prompt
+    "Your goal is (x,y)" and encodes it with a pretrained SBERT model.
+ 
+    Args:
+        output_dim: output embedding dimension (default: 64)
+    """
+    output_dim: int = 64
+ 
+    @nn.compact
+    def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
+        return FrozenSentenceBertGoalEncoder(
+            output_dim=self.output_dim,
+        )(g)
+ 
 
 class SemanticTransformerGEncoder(nn.Module):
     """Goal encoder with a single semantic token.

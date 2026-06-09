@@ -16,7 +16,7 @@ from config import Args
 
 from envs.env_functions import make_env
 from modules.actor import Actor, TransformerActor, SemanticTransformerActor, PerDimTransformerActor, generate_step_functions
-from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
+from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, SemanticTransformerGEncoderText, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
@@ -141,7 +141,11 @@ if __name__ == "__main__":
         sa_encoder = _make_transformer("sa_encoder")
     else:
         sa_encoder = SA_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
-    if g_is_transformer:
+    if args.text_encoder:
+        if args.goal_end_idx - args.goal_start_idx != 2:
+            raise ValueError("text_encoder currently supports only 2D goals")
+        g_encoder = SemanticTransformerGEncoderText(output_dim=64)
+    elif g_is_transformer:
         g_encoder = _make_transformer("g_encoder")
     else:
         g_encoder = G_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)

@@ -71,6 +71,7 @@ class Args:
     loss_temperature: float = 0.1
     use_relu: int = 0
     transformer_mode: Literal["none", "Full", "State", "StateGoal", "StateActor"] = "none"
+    text_encoder: bool = True
     tokenization: str = "patches"  # "patches", "semantic", or "per_dim"
     # Transformer-specific config (only used when transformer_mode != "none")
     transformer_embed_dim: int = 144
