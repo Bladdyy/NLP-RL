@@ -2,7 +2,7 @@ import flax.linen as nn
 from flax.linen.initializers import variance_scaling
 import jax
 import jax.numpy as jnp
-from modules.utils import residual_block
+from modules.utils import residual_block, TransformerBackbone
 from utils import Transition
 
 class Actor(nn.Module):
@@ -46,6 +46,194 @@ class Actor(nn.Module):
 
         return mean, log_std
     
+
+class TransformerActor(nn.Module):
+    """Transformer-based actor that outputs action mean and log_std.
+
+    Uses TransformerBackbone internally for sequence processing.
+    The tokenization strategy can be customized by subclassing TransformerBackbone
+    and overriding _vector_to_sequence.
+    """
+    action_size: int
+    embed_dim: int = 256
+    num_layers: int = 4
+    num_heads: int = 4
+    mlp_ratio: int = 4
+    num_patches: int = 8
+    dropout_rate: float = 0.0
+    pooling: str = "cls"
+    LOG_STD_MAX = 2
+    LOG_STD_MIN = -5
+
+    @nn.compact
+    def __call__(self, x):
+        x = TransformerBackbone(
+            embed_dim=self.embed_dim,
+            num_layers=self.num_layers,
+            num_heads=self.num_heads,
+            mlp_ratio=self.mlp_ratio,
+            num_patches=self.num_patches,
+            dropout_rate=self.dropout_rate,
+            pooling=self.pooling,
+        )(x)
+
+        lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
+        bias_init = nn.initializers.zeros
+
+        mean = nn.Dense(self.action_size, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+        log_std = nn.Dense(self.action_size, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+
+        log_std = nn.tanh(log_std)
+        log_std = self.LOG_STD_MIN + 0.5 * (self.LOG_STD_MAX - self.LOG_STD_MIN) * (log_std + 1)
+
+        return mean, log_std
+
+
+class SemanticTransformerActor(nn.Module):
+    """Actor with semantically meaningful tokens.
+
+    Parses the 31-dim observation (root qpos, hinge qpos, root qvel, hinge qvel,
+    goal) into 10 semantically meaningful tokens:
+      - 1 body token: root qpos (7) + root qvel (6) = 13 dims
+      - 8 hinge tokens: each (hinge qpos, hinge qvel) = 2 dims
+      - 1 goal token: goal / target position (2 dims)
+
+    Each token type uses a separate Dense embedding layer.
+    """
+    action_size: int
+    embed_dim: int = 256
+    num_layers: int = 4
+    num_heads: int = 4
+    mlp_ratio: int = 4
+    dropout_rate: float = 0.0
+    pooling: str = "cls"
+    LOG_STD_MAX = 2
+    LOG_STD_MIN = -5
+
+    @nn.compact
+    def __call__(self, x):
+        lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
+        bias_init = nn.initializers.zeros
+
+        # Parse 31-dim observation:
+        #   [0:7]   = root qpos
+        #   [7:15]  = hinge qpos [hip_1, ankle_1, ..., hip_4, ankle_4]
+        #   [15:21] = root qvel
+        #   [21:29] = hinge qvel
+        #   [29:31] = goal / target_pos
+        root_qpos = x[..., :7]
+        hinge_qpos = x[..., 7:15]
+        root_qvel = x[..., 15:21]
+        hinge_qvel = x[..., 21:29]
+        goal_token = x[..., 29:31]
+
+        # Body token: root qpos + root qvel = 13 dims
+        body_raw = jnp.concatenate([root_qpos, root_qvel], axis=-1)
+        body_token = nn.Dense(
+            self.embed_dim,
+            kernel_init=lecun_unfirom,
+            bias_init=bias_init,
+            name='body_embed',
+        )(body_raw)  # (batch, embed_dim)
+        body_token = nn.LayerNorm(name='body_ln')(body_token)
+
+
+        # 8 hinge tokens, each (qpos_i, qvel_i) = 2 dims
+        hinge_raw = jnp.stack([hinge_qpos, hinge_qvel], axis=-1)  # (batch, 8, 2)
+        hinge_tokens = nn.Dense(
+            self.embed_dim,
+            kernel_init=lecun_unfirom,
+            bias_init=bias_init,
+            name='hinge_embed',
+        )(hinge_raw)  # (batch, 8, embed_dim)
+        hinge_tokens = nn.LayerNorm(name='hinge_ln')(hinge_tokens)
+
+        # Goal token: 2 dims
+        goal_token = nn.Dense(
+            self.embed_dim,
+            kernel_init=lecun_unfirom,
+            bias_init=bias_init,
+            name='goal_embed',
+        )(goal_token)[:, jnp.newaxis, :]  # (batch, 1, embed_dim)
+
+        # Assemble token sequence: [body, hinge_1..8, goal]
+        tokens = jnp.concatenate([
+            body_token[:, jnp.newaxis, :],
+            hinge_tokens,
+            goal_token,
+        ], axis=1)  # (batch, 10, embed_dim)
+
+        # Pass through shared transformer backbone (skips _vector_to_sequence
+        # since tokens is already 3D)
+        x = TransformerBackbone(
+            embed_dim=self.embed_dim,
+            num_layers=self.num_layers,
+            num_heads=self.num_heads,
+            mlp_ratio=self.mlp_ratio,
+            num_patches=0,
+            dropout_rate=self.dropout_rate,
+            pooling=self.pooling,
+        )(tokens)
+
+        mean = nn.Dense(self.action_size, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+        log_std = nn.Dense(self.action_size, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+
+        log_std = nn.tanh(log_std)
+        log_std = self.LOG_STD_MIN + 0.5 * (self.LOG_STD_MAX - self.LOG_STD_MIN) * (log_std + 1)
+
+        return mean, log_std
+
+
+class PerDimTransformerActor(nn.Module):
+    """Actor with one token per input dimension.
+
+    Treats every scalar in the observation as a separate 1-dim token.
+    A shared Dense layer projects each 1-dim scalar to embed_dim.
+    Makes no structural assumptions about the input, so it works for
+    any environment without modification.
+    """
+    action_size: int
+    embed_dim: int = 256
+    num_layers: int = 4
+    num_heads: int = 4
+    mlp_ratio: int = 4
+    dropout_rate: float = 0.0
+    pooling: str = "cls"
+    LOG_STD_MAX = 2
+    LOG_STD_MIN = -5
+
+    @nn.compact
+    def __call__(self, x):
+        lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
+        bias_init = nn.initializers.zeros
+
+        # Each input dim becomes a separate 1-dim token
+        # x shape: (batch, input_dim) -> (batch, input_dim, 1)
+        tokens = x[..., jnp.newaxis]  # (batch, input_dim, 1)
+        tokens = nn.Dense(
+            self.embed_dim,
+            kernel_init=lecun_unfirom,
+            bias_init=bias_init,
+            name='token_embed',
+        )(tokens)  # (batch, input_dim, embed_dim)
+
+        x = TransformerBackbone(
+            embed_dim=self.embed_dim,
+            num_layers=self.num_layers,
+            num_heads=self.num_heads,
+            mlp_ratio=self.mlp_ratio,
+            num_patches=0,
+            dropout_rate=self.dropout_rate,
+            pooling=self.pooling,
+        )(tokens)
+
+        mean = nn.Dense(self.action_size, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+        log_std = nn.Dense(self.action_size, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+
+        log_std = nn.tanh(log_std)
+        log_std = self.LOG_STD_MIN + 0.5 * (self.LOG_STD_MAX - self.LOG_STD_MIN) * (log_std + 1)
+
+        return mean, log_std
 
 
 """

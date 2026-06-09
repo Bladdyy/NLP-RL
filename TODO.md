@@ -1,0 +1,2 @@
+1. Think about positional embeddings with semantic tokens, the 1D learned ones might not be the best.I 
+2. Check that transformer networks are properly initialized, maybe there is some improvement to be done here.

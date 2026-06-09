@@ -15,10 +15,68 @@ from buffer import TrajectoryUniformSamplingQueue
 from config import Args
 
 from envs.env_functions import make_env
-from modules.actor import Actor, generate_step_functions
-from modules.critic import SA_encoder, G_encoder
+from modules.actor import Actor, TransformerActor, SemanticTransformerActor, PerDimTransformerActor, generate_step_functions
+from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
+
+
+def make_transformer_optimizer(learning_rate, weight_decay, max_norm, params, warmup_steps=50_000):
+    """Build an optimizer with gradient clipping, linear LR warmup, and AdamW weight decay
+    applied only to multi-dimensional parameters (weights), not 1D biases or norms.
+    Returns (optimizer, lr_schedule) where lr_schedule can be called with a step count."""
+    lr_schedule = optax.join_schedules([
+        optax.linear_schedule(0.0, learning_rate, transition_steps=warmup_steps),
+        optax.constant_schedule(learning_rate),
+    ], boundaries=[warmup_steps])
+
+    def wd_mask_fn(params):
+        def is_weight(path, value):
+            return value.ndim == 2
+        return jax.tree_util.tree_map_with_path(is_weight, params)
+
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(max_norm),
+        optax.adamw(learning_rate=lr_schedule, weight_decay=weight_decay, mask=wd_mask_fn),
+    )
+    return optimizer, lr_schedule
+
+_TRANSFORMER_CLASSES = {
+    "actor": {
+        "semantic": SemanticTransformerActor,
+        "per_dim": PerDimTransformerActor,
+        "patches": TransformerActor,
+    },
+    "sa_encoder": {
+        "semantic": SemanticTransformerSAEncoder,
+        "per_dim": PerDimTransformerSAEncoder,
+        "patches": TransformerSAEncoder,
+    },
+    "g_encoder": {
+        "semantic": SemanticTransformerGEncoder,
+        "per_dim": PerDimTransformerGEncoder,
+        "patches": TransformerGEncoder,
+    },
+}
+
+
+def _make_transformer(component, *, action_size=None):
+    """Create a transformer network for the given component using the configured tokenization."""
+    cls = _TRANSFORMER_CLASSES[component][args.tokenization]
+    kwargs = dict(
+        embed_dim=args.transformer_embed_dim,
+        num_layers=args.transformer_num_layers,
+        num_heads=args.transformer_num_heads,
+        mlp_ratio=args.transformer_mlp_ratio,
+        dropout_rate=args.transformer_dropout,
+        pooling=args.transformer_pooling,
+    )
+    if action_size is not None:
+        kwargs["action_size"] = action_size
+    if args.tokenization == "patches":
+        kwargs["num_patches"] = args.transformer_num_patches
+    return cls(**kwargs)
+
 
 if __name__ == "__main__":
 
@@ -56,26 +114,57 @@ if __name__ == "__main__":
     # Actor and critic setup ----------------------------------------------------------------------------------------------------------------------------------
 
     # Actor
-    actor = Actor(action_size=action_size, network_width=args.actor_network_width, network_depth=args.actor_depth, skip_connections=args.actor_skip_connections, use_relu=args.use_relu)
+    actor_is_transformer = args.transformer_mode in ("Full", "StateActor")
+    if actor_is_transformer:
+        actor = _make_transformer("actor", action_size=action_size)
+    else:
+        actor = Actor(action_size=action_size, network_width=args.actor_network_width, network_depth=args.actor_depth, skip_connections=args.actor_skip_connections, use_relu=args.use_relu)
+    actor_params = actor.init(actor_key, np.ones([1, obs_size]))
+    actor_lr_schedule = None
+    if actor_is_transformer:
+        actor_tx, actor_lr_schedule = make_transformer_optimizer(
+            args.transformer_lr, args.transformer_weight_decay,
+            args.grad_clip_max_norm, actor_params
+        )
+    else:
+        actor_tx = optax.adam(learning_rate=args.actor_lr)
     actor_state = TrainState.create(
         apply_fn=actor.apply,
-        params=actor.init(actor_key, np.ones([1, obs_size])),
-        tx=optax.adam(learning_rate=args.actor_lr)
+        params=actor_params,
+        tx=actor_tx,
     )
 
     # Critic
-    sa_encoder = SA_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+    sa_is_transformer = args.transformer_mode in ("Full", "State", "StateGoal", "StateActor")
+    g_is_transformer = args.transformer_mode in ("Full", "StateGoal")
+    if sa_is_transformer:
+        sa_encoder = _make_transformer("sa_encoder")
+    else:
+        sa_encoder = SA_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+    if g_is_transformer:
+        g_encoder = _make_transformer("g_encoder")
+    else:
+        g_encoder = G_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
     sa_encoder_params = sa_encoder.init(sa_key, np.ones([1, args.obs_dim]), np.ones([1, action_size]))
-    g_encoder = G_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
     g_encoder_params = g_encoder.init(g_key, np.ones([1, args.goal_end_idx - args.goal_start_idx]))
-    
+    critic_params = {
+        "sa_encoder": sa_encoder_params,
+        "g_encoder": g_encoder_params
+    }
+
+    critic_lr_schedule = None
+    critic_any_transformer = sa_is_transformer or g_is_transformer
+    if critic_any_transformer:
+        critic_tx, critic_lr_schedule = make_transformer_optimizer(
+            args.transformer_lr, args.transformer_weight_decay,
+            args.grad_clip_max_norm, critic_params
+        )
+    else:
+        critic_tx = optax.adam(learning_rate=args.critic_lr)
     critic_state = TrainState.create(
         apply_fn=None,
-        params={
-            "sa_encoder": sa_encoder_params, 
-            "g_encoder": g_encoder_params
-            },
-        tx=optax.adam(learning_rate=args.critic_lr),
+        params=critic_params,
+        tx=critic_tx,
     )
 
     # Entropy coefficient
@@ -205,6 +294,14 @@ if __name__ == "__main__":
             "training/envsteps": training_state.env_steps.item(),
             **{f"training/{name}": value for name, value in metrics.items()},
         }
+
+        # Log learning rates
+        if actor_is_transformer:
+            step = training_state.gradient_steps.item()
+            metrics["training/learning_rate"] = actor_lr_schedule(step)
+        else:
+            metrics["training/learning_rate_actor"] = args.actor_lr
+            metrics["training/learning_rate_critic"] = args.critic_lr
 
         metrics = evaluator.run_evaluation(training_state, metrics)
 

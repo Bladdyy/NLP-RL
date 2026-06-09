@@ -8,8 +8,8 @@ dependencies = [
     "numpy==1.26.4",
     "nvidia-cudnn-cu12==8.9.2.26; platform_system == 'Linux'",
     "nvidia-cublas-cu12; platform_system == 'Linux'",
-    "jax==0.4.23",                                         
-    "jaxlib==0.4.23; platform_system != 'Linux'",          
+    "jax==0.4.23",
+    "jaxlib==0.4.23; platform_system != 'Linux'",
     "jax[cuda12_pip]==0.4.23; platform_system == 'Linux'",
     "flax==0.7.4",
     "tyro",
@@ -18,7 +18,8 @@ dependencies = [
     "brax==0.10.1",
     "mediapy==1.2.2",
     "scipy==1.12.0",
-    "mujoco==3.2.6"
+    "mujoco==3.2.6",
+    "uv>=0.11.15",
 ]
 
 [tool.uv]

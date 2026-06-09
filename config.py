@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Literal
 
 @dataclass
 class Args:
@@ -7,9 +8,9 @@ class Args:
     torch_deterministic: bool = True
     cuda: bool = True
     track: bool = True
-    wandb_project_name: str = "clean_JaxGCRL_test"
-    wandb_entity: str = 'wang-kevin3290-princeton-university'
-    wandb_mode: str = 'offline'
+    wandb_project_name: str = "NLPRL"
+    wandb_entity: str = 'oskarkulinski-mimuw'
+    wandb_mode: str = 'online'
     wandb_dir: str = '.'
     wandb_group: str = '.'
     capture_vis: bool = True
@@ -67,7 +68,21 @@ class Args:
     
     entropy_param: float = 0.5
     disable_entropy: int = 0
+    loss_temperature: float = 0.1
     use_relu: int = 0
+    transformer_mode: Literal["none", "Full", "State", "StateGoal", "StateActor"] = "none"
+    tokenization: str = "patches"  # "patches", "semantic", or "per_dim"
+    # Transformer-specific config (only used when transformer_mode != "none")
+    transformer_embed_dim: int = 144
+    transformer_num_layers: int = 4
+    transformer_num_heads: int = 4
+    transformer_mlp_ratio: int = 4
+    transformer_num_patches: int = 8
+    transformer_dropout: float = 0.0
+    transformer_pooling: str = "cls"  # "cls", "mean", or "flatten"
+    grad_clip_max_norm: float = 1.0
+    transformer_lr: float = 3e-4
+    transformer_weight_decay: float = 0.0
     num_render: int = 10
     save_buffer: int = 0
     
