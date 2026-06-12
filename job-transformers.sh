@@ -27,21 +27,22 @@ uv run main.py \
   --num_envs 512 \
   --batch_size 512 \
   --min_replay_size 1000 \
-  --max_replay_size 100_000 \
-  --transformer_mode StateActor \
+  --max_replay_size 100_00 \
+  --transformer_mode State \
   --transformer_embed_dim 144\
   --transformer_num_layers 2 \
   --transformer_num_heads 4 \
   --transformer_mlp_ratio 4 \
   --transformer_num_patches 8 \
-  --transformer_dropout 0.1 \
+  --transformer_dropout 0 \
   --transformer_pooling cls \
   --tokenization semantic \
-  --grad_clip_max_norm 15.0 \
+  --grad_clip_max_norm 10.0 \
   --transformer_lr 1e-4 \
-  --transformer_weight_decay 1e-2 \
+  --transformer_weight_decay 1e-4 \
   --loss_temperature 0.1 \
-  --entropy_param 1.0
+  --learnable_temperature False \
+  --entropy_param 0.5 
 
  echo "Finished"
                    

@@ -176,6 +176,22 @@ if __name__ == "__main__":
         tx=optax.adam(learning_rate=args.alpha_lr),
     )
     
+    # Learnable temperature (CLIP-style)
+    if args.learnable_temperature:
+        log_temperature = jnp.asarray(jnp.log(args.loss_temperature), dtype=jnp.float32)
+        temperature_state = TrainState.create(
+            apply_fn=None,
+        	params={"log_temperature": log_temperature},
+        	tx=optax.adam(learning_rate=args.critic_lr),
+    	)
+    else:
+        # Dummy state, never used
+        temperature_state = TrainState.create(
+            apply_fn=None,
+        	params={"log_temperature": jnp.asarray(0.0, dtype=jnp.float32)},
+        	tx=optax.adam(learning_rate=args.critic_lr),
+    	)
+    
     # Train state
     training_state = TrainingState(
         env_steps=jnp.zeros(()),
@@ -183,6 +199,7 @@ if __name__ == "__main__":
         actor_state=actor_state,
         critic_state=critic_state,
         alpha_state=alpha_state,
+        temperature_state=temperature_state,
     )
 
 

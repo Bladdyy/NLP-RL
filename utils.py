@@ -23,6 +23,7 @@ class TrainingState:
     actor_state: TrainState
     critic_state: TrainState
     alpha_state: TrainState
+    temperature_state: TrainState
 
 class Transition(NamedTuple):
     """Container for a transition"""

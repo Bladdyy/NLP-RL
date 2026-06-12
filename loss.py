@@ -11,7 +11,7 @@ since these are used in the loss functions and are not expected to change during
 """
 def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
     
-    def actor_loss(actor_params, critic_params, log_alpha, transitions, key):
+    def actor_loss(actor_params, critic_params, log_alpha, transitions, key, log_temperature=None):
         obs = transitions.observation           # expected_shape = batch_size, obs_size + goal_size
         state = obs[:, :args.obs_dim]
         future_state = transitions.extras["future_state"]
@@ -30,14 +30,13 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         sa_repr = sa_encoder.apply(sa_encoder_params, state, action)
         g_repr = g_encoder.apply(g_encoder_params, goal)
         
-        #sa_repr_norm = sa_repr / (jnp.linalg.norm(sa_repr, axis=-1, keepdims=True) + 1e-6)
-        #g_repr_norm = g_repr / (jnp.linalg.norm(g_repr, axis=-1, keepdims=True) + 1e-6)
-
         #distances = -jnp.sqrt(jnp.sum((sa_repr_norm - g_repr_norm) ** 2, axis=-1))
         
         #qf_pi = distances / args.loss_temperature
 
         qf_pi = -jnp.sqrt(jnp.sum((sa_repr - g_repr) ** 2, axis=-1))
+        if args.learnable_temperature:
+            qf_pi = qf_pi / jnp.exp(log_temperature)
         if args.disable_entropy:
             actor_loss = -jnp.mean(qf_pi)
         else:
@@ -53,7 +52,7 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         return jnp.mean(alpha_loss)
 
 
-    def critic_loss(critic_params, transitions, key):
+    def critic_loss(critic_params, transitions, key, log_temperature=None):
         sa_encoder_params, g_encoder_params = critic_params["sa_encoder"], critic_params["g_encoder"]
         
         obs = transitions.observation[:, :args.obs_dim]
@@ -70,6 +69,8 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         #logits = -distances / args.loss_temperature
         
         logits = -jnp.sqrt(jnp.sum((sa_repr[:, None, :] - g_repr[None, :, :]) ** 2, axis=-1))
+        if args.learnable_temperature:
+            logits = logits / jnp.exp(log_temperature)
 
         # InfoNCE
         critic_loss = -jnp.mean(jnp.diag(logits) - jax.nn.logsumexp(logits, axis=1))
@@ -98,7 +99,9 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         )
         
         
-        (actorloss, (log_prob, actor_sa_embedding_norm)), actor_grad = jax.value_and_grad(actor_loss, has_aux=True)(training_state.actor_state.params, training_state.critic_state.params, training_state.alpha_state.params['log_alpha'], transitions, key)
+        log_temperature = training_state.temperature_state.params['log_temperature'] if args.learnable_temperature else None
+
+        (actorloss, (log_prob, actor_sa_embedding_norm)), actor_grad = jax.value_and_grad(actor_loss, has_aux=True)(training_state.actor_state.params, training_state.critic_state.params, training_state.alpha_state.params['log_alpha'], transitions, key, log_temperature)
         new_actor_state = training_state.actor_state.apply_gradients(grads=actor_grad)
 
         actor_grad_norm = jnp.sqrt(jax.tree_util.tree_reduce(lambda s, x: s + jnp.sum(x ** 2), jax.tree_util.tree_leaves(actor_grad), initializer=0.0))
@@ -116,6 +119,8 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
             "grad_norm_actor": actor_grad_norm,
             "sa_embedding_norm": actor_sa_embedding_norm,
         }
+        if args.learnable_temperature:
+            metrics["log_temperature"] = training_state.temperature_state.params["log_temperature"]
 
         return training_state, metrics
 
@@ -126,13 +131,25 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
             lambda x: x[:critic_batch_size], 
             transitions
         )
-            
-        (loss, (logsumexp, I, correct, logits_pos, logits_neg, critic_sa_embedding_norm)), grad = jax.value_and_grad(critic_loss, has_aux=True)(training_state.critic_state.params, transitions, key)
-        new_critic_state = training_state.critic_state.apply_gradients(grads=grad)
+
+        if args.learnable_temperature:
+            log_temperature = training_state.temperature_state.params['log_temperature']
+
+            def critic_loss_with_temp(critic_params, log_temperature):
+                return critic_loss(critic_params, transitions, key, log_temperature)
+
+            (loss, (logsumexp, I, correct, logits_pos, logits_neg, critic_sa_embedding_norm)), (grad, temp_grad) = jax.value_and_grad(critic_loss_with_temp, argnums=(0, 1), has_aux=True)(
+                training_state.critic_state.params, log_temperature
+            )
+            new_critic_state = training_state.critic_state.apply_gradients(grads=grad)
+            new_temperature_state = training_state.temperature_state.apply_gradients(grads={'log_temperature': temp_grad})
+            training_state = training_state.replace(critic_state=new_critic_state, temperature_state=new_temperature_state)
+        else:
+            (loss, (logsumexp, I, correct, logits_pos, logits_neg, critic_sa_embedding_norm)), grad = jax.value_and_grad(critic_loss, has_aux=True)(training_state.critic_state.params, transitions, key)
+            new_critic_state = training_state.critic_state.apply_gradients(grads=grad)
+            training_state = training_state.replace(critic_state=new_critic_state)
 
         critic_grad_norm = jnp.sqrt(jax.tree_util.tree_reduce(lambda s, x: s + jnp.sum(x ** 2), jax.tree_util.tree_leaves(grad), initializer=0.0))
-
-        training_state = training_state.replace(critic_state = new_critic_state)
 
         metrics = {
             "categorical_accuracy": jnp.mean(correct),
@@ -143,6 +160,8 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
             "grad_norm_critic": critic_grad_norm,
             "sa_embedding_norm": critic_sa_embedding_norm,
         }
+        if args.learnable_temperature:
+            metrics["log_temperature"] = training_state.temperature_state.params["log_temperature"]
 
         return training_state, metrics
     

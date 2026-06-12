@@ -69,6 +69,7 @@ class Args:
     entropy_param: float = 0.5
     disable_entropy: int = 0
     loss_temperature: float = 0.1
+    learnable_temperature: bool = False
     use_relu: int = 0
     transformer_mode: Literal["none", "Full", "State", "StateGoal", "StateActor"] = "none"
     tokenization: str = "patches"  # "patches", "semantic", or "per_dim"
