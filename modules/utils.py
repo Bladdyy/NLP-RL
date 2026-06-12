@@ -1,9 +1,39 @@
 import flax.linen as nn
 from flax.linen.initializers import variance_scaling
+import jax
 import jax.numpy as jnp
 
 lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
 bias_init = nn.initializers.zeros
+
+
+def scale_transformer_projections(params, num_layers):
+    """Scale the final projection weights in transformer blocks by ``1 / sqrt(2 * num_layers)``.
+
+    This implements the DeepNet initialisation scheme (Wang et al., 2022).
+    The attention output projection (named ``out`` in
+    ``MultiHeadDotProductAttention``) and the FFN output projection (named
+    ``ffn_proj``) are scaled so that the residual stream is initially dominated
+    by the identity path, stabilising training for very deep transformers.
+
+    Args:
+        params: Flax parameter tree containing transformer blocks.
+        num_layers: Total number of transformer layers (N in 1/sqrt(2N)).
+
+    Returns:
+        New parameter tree with scaled final projection kernels.
+    """
+    scale = 1.0 / jnp.sqrt(2.0 * num_layers)
+
+    def _scale_fn(path, value):
+        path_str = jax.tree_util.keystr(path)
+        if not path_str.endswith('.kernel'):
+            return value
+        if '.out.' in path_str or '.ffn_proj.' in path_str:
+            return value * scale
+        return value
+
+    return jax.tree_util.tree_map_with_path(_scale_fn, params)
 
 
 def residual_block(x, width, normalize, activation):
@@ -48,10 +78,10 @@ class TransformerBlock(nn.Module):
         # Pre-LN FFN
         residual = x
         x = nn.LayerNorm()(x)
-        x = nn.Dense(self.mlp_dim)(x)
+        x = nn.Dense(self.mlp_dim, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
         x = nn.swish(x)
         x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
-        x = nn.Dense(self.embed_dim)(x)
+        x = nn.Dense(self.embed_dim, kernel_init=lecun_unfirom, bias_init=bias_init, name='ffn_proj')(x)
         x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
         x = residual + x
 

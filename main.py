@@ -17,6 +17,7 @@ from config import Args
 from envs.env_functions import make_env
 from modules.actor import Actor, TransformerActor, SemanticTransformerActor, PerDimTransformerActor, generate_step_functions
 from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
+from modules.utils import scale_transformer_projections
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
@@ -120,6 +121,8 @@ if __name__ == "__main__":
     else:
         actor = Actor(action_size=action_size, network_width=args.actor_network_width, network_depth=args.actor_depth, skip_connections=args.actor_skip_connections, use_relu=args.use_relu)
     actor_params = actor.init(actor_key, np.ones([1, obs_size]))
+    if actor_is_transformer:
+        actor_params = scale_transformer_projections(actor_params, args.transformer_num_layers)
     actor_lr_schedule = None
     if actor_is_transformer:
         actor_tx, actor_lr_schedule = make_transformer_optimizer(
@@ -146,7 +149,11 @@ if __name__ == "__main__":
     else:
         g_encoder = G_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
     sa_encoder_params = sa_encoder.init(sa_key, np.ones([1, args.obs_dim]), np.ones([1, action_size]))
+    if sa_is_transformer:
+        sa_encoder_params = scale_transformer_projections(sa_encoder_params, args.transformer_num_layers)
     g_encoder_params = g_encoder.init(g_key, np.ones([1, args.goal_end_idx - args.goal_start_idx]))
+    if g_is_transformer:
+        g_encoder_params = scale_transformer_projections(g_encoder_params, args.transformer_num_layers)
     critic_params = {
         "sa_encoder": sa_encoder_params,
         "g_encoder": g_encoder_params
