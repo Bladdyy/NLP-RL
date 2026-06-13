@@ -1,13 +1,4 @@
 #!/bin/bash
-#
-#SBATCH --job-name=crl-transformer
-#SBATCH --partition=a100
-#SBATCH --qos=ok479034_a100
-#SBATCH --gres=gpu:1
-#SBATCH --output=logs/slurm-crl-transformer.txt
-#SBATCH --error=logs/slurm-crl-transformer-error.txt
-#SBATCH --time=16:00:00
-
 echo "Started"
 
 set -eux
@@ -41,7 +32,8 @@ uv run main.py \
   --transformer_lr 1e-4 \
   --transformer_weight_decay 1e-4 \
   --loss_temperature 0.1 \
-  --learnable_temperature False \
+  --learnable_temperature \
+  --embed_norm l2 \
   --entropy_param 0.5 
 
  echo "Finished"

@@ -29,20 +29,22 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         sa_encoder_params, g_encoder_params = critic_params["sa_encoder"], critic_params["g_encoder"]
         sa_repr = sa_encoder.apply(sa_encoder_params, state, action)
         g_repr = g_encoder.apply(g_encoder_params, goal)
-        
-        #distances = -jnp.sqrt(jnp.sum((sa_repr_norm - g_repr_norm) ** 2, axis=-1))
-        
-        #qf_pi = distances / args.loss_temperature
 
-        qf_pi = -jnp.sqrt(jnp.sum((sa_repr - g_repr) ** 2, axis=-1))
+        sa_embedding_norm = jnp.sqrt(jnp.sum(sa_repr ** 2, axis=-1)).mean()
+        if args.embed_norm == "l2":
+            sa_repr = sa_repr / (jnp.linalg.norm(sa_repr, axis=-1, keepdims=True) + 1e-6)
+            g_repr = g_repr / (jnp.linalg.norm(g_repr, axis=-1, keepdims=True) + 1e-6)
+            qf_pi = jnp.sum(sa_repr * g_repr, axis=-1)
+        else:
+            qf_pi = -jnp.sqrt(jnp.sum((sa_repr - g_repr) ** 2, axis=-1))
         if args.learnable_temperature:
-            qf_pi = qf_pi / jnp.exp(log_temperature)
+            safe_log_temp = jnp.clip(log_temperature, a_min=-5.0, a_max=5.0)
+            qf_pi = qf_pi / jnp.exp(safe_log_temp)
         if args.disable_entropy:
             actor_loss = -jnp.mean(qf_pi)
         else:
             actor_loss = jnp.mean( jnp.exp(log_alpha) * log_prob - (qf_pi) )
 
-        sa_embedding_norm = jnp.sqrt(jnp.sum(sa_repr ** 2, axis=-1)).mean()
         return actor_loss, (log_prob, sa_embedding_norm)
 
 
@@ -60,17 +62,17 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         
         sa_repr = sa_encoder.apply(sa_encoder_params, obs, action)
         g_repr = g_encoder.apply(g_encoder_params, transitions.observation[:, args.obs_dim:])
-            
-        #sa_repr_norm = sa_repr / (jnp.linalg.norm(sa_repr, axis=-1, keepdims=True) + 1e-6)
-        #g_repr_norm = g_repr / (jnp.linalg.norm(g_repr, axis=-1, keepdims=True) + 1e-6)
 
-        #distances = jnp.sqrt(jnp.sum((sa_repr_norm[:, None, :] - g_repr_norm[None, :, :]) ** 2, axis=-1))
-
-        #logits = -distances / args.loss_temperature
-        
-        logits = -jnp.sqrt(jnp.sum((sa_repr[:, None, :] - g_repr[None, :, :]) ** 2, axis=-1))
+        sa_embedding_norm = jnp.sqrt(jnp.sum(sa_repr ** 2, axis=-1)).mean()
+        if args.embed_norm == "l2":
+            sa_repr = sa_repr / (jnp.linalg.norm(sa_repr, axis=-1, keepdims=True) + 1e-6)
+            g_repr = g_repr / (jnp.linalg.norm(g_repr, axis=-1, keepdims=True) + 1e-6)
+            logits = jnp.sum(sa_repr[:, None, :] * g_repr[None, :, :], axis=-1)
+        else:
+            logits = -jnp.sqrt(jnp.sum((sa_repr[:, None, :] - g_repr[None, :, :]) ** 2, axis=-1))
         if args.learnable_temperature:
-            logits = logits / jnp.exp(log_temperature)
+            safe_log_temp = jnp.clip(log_temperature, a_min=-5.0, a_max=5.0)
+            logits = logits / jnp.exp(safe_log_temp)
 
         # InfoNCE
         critic_loss = -jnp.mean(jnp.diag(logits) - jax.nn.logsumexp(logits, axis=1))
@@ -85,7 +87,6 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         logits_pos = jnp.mean(jnp.diag(logits))
         logits_neg = (jnp.sum(logits) - jnp.sum(jnp.diag(logits))) / (B * (B - 1))
 
-        sa_embedding_norm = jnp.sqrt(jnp.sum(sa_repr ** 2, axis=-1)).mean()
 
         return critic_loss, (logsumexp, I, correct, logits_pos, logits_neg, sa_embedding_norm)
 
