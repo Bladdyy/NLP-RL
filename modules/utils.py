@@ -7,7 +7,7 @@ lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
 bias_init = nn.initializers.zeros
 
 
-def apply_residual_scaling(params, num_layers):
+def scale_transformer_projections(params, num_layers):
     scale = 1.0 / jnp.sqrt(2.0 * num_layers)
 
     def _scale_fn(path, value):
