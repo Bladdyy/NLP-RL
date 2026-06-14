@@ -82,6 +82,7 @@ class Args:
     transformer_num_patches: int = 8
     transformer_dropout: float = 0.0
     transformer_pooling: str = "cls"  # "cls", "mean", or "flatten"
+    transformer_post_norm: bool = False  # if True, use post-LN instead of pre-LN
     grad_clip_max_norm: float = 1.0
     transformer_lr: float = 3e-4
     transformer_weight_decay: float = 0.0

@@ -71,6 +71,7 @@ def _make_transformer(component, *, action_size=None):
         mlp_ratio=args.transformer_mlp_ratio,
         dropout_rate=args.transformer_dropout,
         pooling=args.transformer_pooling,
+        use_post_norm=args.transformer_post_norm,
     )
     if action_size is not None:
         kwargs["action_size"] = action_size

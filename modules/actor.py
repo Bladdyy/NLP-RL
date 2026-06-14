@@ -62,6 +62,7 @@ class TransformerActor(nn.Module):
     num_patches: int = 8
     dropout_rate: float = 0.0
     pooling: str = "cls"
+    use_post_norm: bool = False
     LOG_STD_MAX = 2
     LOG_STD_MIN = -5
 
@@ -75,6 +76,7 @@ class TransformerActor(nn.Module):
             num_patches=self.num_patches,
             dropout_rate=self.dropout_rate,
             pooling=self.pooling,
+            use_post_norm=self.use_post_norm,
         )(x)
 
         lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
@@ -107,6 +109,7 @@ class SemanticTransformerActor(nn.Module):
     mlp_ratio: int = 4
     dropout_rate: float = 0.0
     pooling: str = "cls"
+    use_post_norm: bool = False
     LOG_STD_MAX = 2
     LOG_STD_MIN = -5
 
@@ -173,6 +176,7 @@ class SemanticTransformerActor(nn.Module):
             num_patches=0,
             dropout_rate=self.dropout_rate,
             pooling=self.pooling,
+            use_post_norm=self.use_post_norm,
         )(tokens)
 
         mean = nn.Dense(self.action_size, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
@@ -199,6 +203,7 @@ class PerDimTransformerActor(nn.Module):
     mlp_ratio: int = 4
     dropout_rate: float = 0.0
     pooling: str = "cls"
+    use_post_norm: bool = False
     LOG_STD_MAX = 2
     LOG_STD_MIN = -5
 
@@ -225,6 +230,7 @@ class PerDimTransformerActor(nn.Module):
             num_patches=0,
             dropout_rate=self.dropout_rate,
             pooling=self.pooling,
+            use_post_norm=self.use_post_norm,
         )(tokens)
 
         mean = nn.Dense(self.action_size, kernel_init=lecun_unfirom, bias_init=bias_init)(x)

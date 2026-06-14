@@ -45,35 +45,62 @@ def residual_block(x, width, normalize, activation):
 
 
 class TransformerBlock(nn.Module):
-    """A single transformer encoder block with pre-LN architecture."""
+    """A single transformer encoder block.
+    
+    Supports both pre-LN (LayerNorm before sublayer) and post-LN (LayerNorm after residual addition).
+    """
     embed_dim: int
     num_heads: int
     mlp_dim: int
     dropout_rate: float = 0.0
+    use_post_norm: bool = False
 
     @nn.compact
     def __call__(self, x, deterministic=True):
-        # Pre-LN self-attention
-        residual = x
-        x = nn.LayerNorm()(x)
-        x = nn.MultiHeadDotProductAttention(
-            num_heads=self.num_heads,
-            qkv_features=self.embed_dim,
-            out_features=self.embed_dim,
-            dropout_rate=self.dropout_rate,
-        )(inputs_q=x, inputs_kv=x, deterministic=deterministic)
-        x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
-        x = residual + x
+        if self.use_post_norm:
+            # Post-LN self-attention
+            residual = x
+            x = nn.MultiHeadDotProductAttention(
+                num_heads=self.num_heads,
+                qkv_features=self.embed_dim,
+                out_features=self.embed_dim,
+                dropout_rate=self.dropout_rate,
+            )(inputs_q=x, inputs_kv=x, deterministic=deterministic)
+            x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
+            x = residual + x
+            x = nn.LayerNorm()(x)
 
-        # Pre-LN FFN
-        residual = x
-        x = nn.LayerNorm()(x)
-        x = nn.Dense(self.mlp_dim, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
-        x = nn.swish(x)
-        x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
-        x = nn.Dense(self.embed_dim, kernel_init=lecun_unfirom, bias_init=bias_init, name='ffn_proj')(x)
-        x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
-        x = residual + x
+            # Post-LN FFN
+            residual = x
+            x = nn.Dense(self.mlp_dim, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+            x = nn.swish(x)
+            x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
+            x = nn.Dense(self.embed_dim, kernel_init=lecun_unfirom, bias_init=bias_init, name='ffn_proj')(x)
+            x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
+            x = residual + x
+            x = nn.LayerNorm()(x)
+        else:
+            # Pre-LN self-attention
+            residual = x
+            x = nn.LayerNorm()(x)
+            x = nn.MultiHeadDotProductAttention(
+                num_heads=self.num_heads,
+                qkv_features=self.embed_dim,
+                out_features=self.embed_dim,
+                dropout_rate=self.dropout_rate,
+            )(inputs_q=x, inputs_kv=x, deterministic=deterministic)
+            x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
+            x = residual + x
+
+            # Pre-LN FFN
+            residual = x
+            x = nn.LayerNorm()(x)
+            x = nn.Dense(self.mlp_dim, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
+            x = nn.swish(x)
+            x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
+            x = nn.Dense(self.embed_dim, kernel_init=lecun_unfirom, bias_init=bias_init, name='ffn_proj')(x)
+            x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
+            x = residual + x
 
         return x
 
@@ -96,6 +123,7 @@ class TransformerBackbone(nn.Module):
     num_patches: int = 8
     dropout_rate: float = 0.0
     pooling: str = "cls"  # "cls", "mean", or "flatten"
+    use_post_norm: bool = False
 
     @nn.compact
     def __call__(self, x, deterministic=True):
@@ -130,6 +158,7 @@ class TransformerBackbone(nn.Module):
                 num_heads=self.num_heads,
                 mlp_dim=self.embed_dim * self.mlp_ratio,
                 dropout_rate=self.dropout_rate,
+                use_post_norm=self.use_post_norm,
                 name=f'transformer_block_{i}',
             )(x, deterministic=deterministic)
 

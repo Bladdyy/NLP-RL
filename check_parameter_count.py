@@ -38,6 +38,7 @@ if __name__ == "__main__":
             num_patches=args.transformer_num_patches,
             dropout_rate=args.transformer_dropout,
             use_cls_token=bool(args.transformer_use_cls_token),
+            use_post_norm=args.transformer_post_norm,
         )
     else:
         sa_encoder = SA_encoder(
@@ -55,6 +56,7 @@ if __name__ == "__main__":
             num_patches=args.transformer_num_patches,
             dropout_rate=args.transformer_dropout,
             use_cls_token=bool(args.transformer_use_cls_token),
+            use_post_norm=args.transformer_post_norm,
         )
     else:
         g_encoder = G_encoder(

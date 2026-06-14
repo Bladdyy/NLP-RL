@@ -40,9 +40,8 @@ uv run main.py \
   --grad_clip_max_norm 10.0 \
   --transformer_lr 1e-4 \
   --transformer_weight_decay 1e-4 \
-  --loss_temperature 0.1 \
-  --learnable_temperature \
-  --embed_norm l2 \
+  --embed_norm base \
+  --use_post_norm \
   --entropy_param 0.5 
 
  echo "Finished"

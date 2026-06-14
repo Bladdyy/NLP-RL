@@ -53,6 +53,7 @@ class TransformerSAEncoder(nn.Module):
     num_patches: int = 8
     dropout_rate: float = 0.0
     pooling: str = "cls"
+    use_post_norm: bool = False
 
     @nn.compact
     def __call__(self, s: jnp.ndarray, a: jnp.ndarray):
@@ -65,6 +66,7 @@ class TransformerSAEncoder(nn.Module):
             num_patches=self.num_patches,
             dropout_rate=self.dropout_rate,
             pooling=self.pooling,
+            use_post_norm=self.use_post_norm,
         )(x)
 
         lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
@@ -123,6 +125,7 @@ class TransformerGEncoder(nn.Module):
     num_patches: int = 8
     dropout_rate: float = 0.0
     pooling: str = "cls"
+    use_post_norm: bool = False
 
     @nn.compact
     def __call__(self, g: jnp.ndarray):
@@ -134,6 +137,7 @@ class TransformerGEncoder(nn.Module):
             num_patches=self.num_patches,
             dropout_rate=self.dropout_rate,
             pooling=self.pooling,
+            use_post_norm=self.use_post_norm,
         )(g)
 
         lecun_unfirom = variance_scaling(1/3, "fan_in", "uniform")
@@ -160,6 +164,7 @@ class SemanticTransformerSAEncoder(nn.Module):
     mlp_ratio: int = 4
     dropout_rate: float = 0.0
     pooling: str = "cls"
+    use_post_norm: bool = False
 
     @nn.compact
     def __call__(self, s: jnp.ndarray, a: jnp.ndarray):
@@ -218,6 +223,7 @@ class SemanticTransformerSAEncoder(nn.Module):
             num_patches=0,  # unused when input is 3D
             dropout_rate=self.dropout_rate,
             pooling=self.pooling,
+            use_post_norm=self.use_post_norm,
         )(tokens)
 
         # Final projection to 64-dim representation
@@ -237,6 +243,7 @@ class SemanticTransformerGEncoder(nn.Module):
     mlp_ratio: int = 4
     dropout_rate: float = 0.0
     pooling: str = "cls"
+    use_post_norm: bool = False
 
     @nn.compact
     def __call__(self, g: jnp.ndarray):
@@ -261,6 +268,7 @@ class SemanticTransformerGEncoder(nn.Module):
             num_patches=0,  # unused when input is 3D
             dropout_rate=self.dropout_rate,
             pooling=self.pooling,
+            use_post_norm=self.use_post_norm,
         )(tokens)
 
         # Final projection to 64-dim representation
@@ -281,6 +289,7 @@ class PerDimTransformerSAEncoder(nn.Module):
     mlp_ratio: int = 4
     dropout_rate: float = 0.0
     pooling: str = "cls"
+    use_post_norm: bool = False
 
     @nn.compact
     def __call__(self, s: jnp.ndarray, a: jnp.ndarray):
@@ -306,6 +315,7 @@ class PerDimTransformerSAEncoder(nn.Module):
             num_patches=0,
             dropout_rate=self.dropout_rate,
             pooling=self.pooling,
+            use_post_norm=self.use_post_norm,
         )(tokens)
 
         x = nn.Dense(64, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
@@ -323,6 +333,7 @@ class PerDimTransformerGEncoder(nn.Module):
     mlp_ratio: int = 4
     dropout_rate: float = 0.0
     pooling: str = "cls"
+    use_post_norm: bool = False
 
     @nn.compact
     def __call__(self, g: jnp.ndarray):
@@ -346,6 +357,7 @@ class PerDimTransformerGEncoder(nn.Module):
             num_patches=0,
             dropout_rate=self.dropout_rate,
             pooling=self.pooling,
+            use_post_norm=self.use_post_norm,
         )(tokens)
 
         x = nn.Dense(64, kernel_init=lecun_unfirom, bias_init=bias_init)(x)
