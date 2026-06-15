@@ -2,7 +2,7 @@ import flax.linen as nn
 from flax.linen.initializers import variance_scaling
 import jax.numpy as jnp
 from modules.utils import residual_block, TransformerBackbone
-from modules.frozen_text_encoder import FrozenSentenceBertGoalEncoder
+from modules.frozen_text_encoder import FrozenSentenceBertGoalEncoder, PrecomputedFrozenSentenceBertGoalEncoder
 
 class SA_encoder(nn.Module):
     norm_type = "layer_norm"
@@ -229,17 +229,30 @@ class SemanticTransformerSAEncoder(nn.Module):
 class SemanticTransformerGEncoderText(nn.Module):
     """
     Goal encoder using frozen Sentence-BERT text encoding.
- 
+
     Converts the 2-dim goal (x, y) into the prompt
     "Your goal is (x,y)" and encodes it with a pretrained SBERT model.
- 
+
+    When ``possible_goals`` is provided, precomputes embeddings for all
+    possible positions at init time and uses fast nearest-neighbour
+    look-up during training instead of running the SBERT model.
+
     Args:
-        output_dim: output embedding dimension (default: 64)
+        output_dim: output embedding dimension (default: 64).
+        possible_goals: (N, 2) array of all goal coordinates that may
+            appear during training. If ``None``, the original SBERT
+            forward pass is used (slower but general).
     """
     output_dim: int = 64
- 
+    possible_goals: jnp.ndarray | None = None
+
     @nn.compact
     def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
+        if self.possible_goals is not None:
+            return PrecomputedFrozenSentenceBertGoalEncoder(
+                output_dim=self.output_dim,
+                possible_goals=self.possible_goals,
+            )(g)
         return FrozenSentenceBertGoalEncoder(
             output_dim=self.output_dim,
         )(g)

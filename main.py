@@ -87,6 +87,9 @@ if __name__ == "__main__":
 
     # Training environment setup ------------------------------------------------------------------------------------------------------------------------------
     env = make_env(args.env_id, args)
+    # Extract possible goals before wrapping — used by the text encoder
+    # for precomputed embedding look-up (avoids running SBERT every batch).
+    possible_goals = getattr(env, 'possible_goals', None)
     env = envs.training.wrap(env, episode_length=args.episode_length,)
 
     obs_size = env.observation_size
@@ -102,6 +105,18 @@ if __name__ == "__main__":
         args.eval_env_id = args.env_id
         
     eval_env = make_env(args.eval_env_id, args)
+    # Also extract eval goals and merge with training goals so the precomputed
+    # lookup table covers both (eval goals may differ from training goals).
+    eval_possible_goals = getattr(eval_env, 'possible_goals', None)
+    if possible_goals is not None and eval_possible_goals is not None:
+        # Union of training and eval goals (deduplicated)
+        all_goals = jnp.unique(
+            jnp.concatenate([possible_goals, eval_possible_goals], axis=0),
+            axis=0,
+        )
+        possible_goals = all_goals
+    elif eval_possible_goals is not None:
+        possible_goals = eval_possible_goals
     eval_env = envs.training.wrap(
         eval_env,
         episode_length=args.episode_length,
@@ -144,7 +159,10 @@ if __name__ == "__main__":
     if args.text_encoder:
         if args.goal_end_idx - args.goal_start_idx != 2:
             raise ValueError("text_encoder currently supports only 2D goals")
-        g_encoder = SemanticTransformerGEncoderText(output_dim=64)
+        g_encoder = SemanticTransformerGEncoderText(
+            output_dim=64,
+            possible_goals=possible_goals,
+        )
     elif g_is_transformer:
         g_encoder = _make_transformer("g_encoder")
     else:

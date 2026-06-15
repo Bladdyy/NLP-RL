@@ -11,6 +11,7 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import flax.linen as nn
 from flax.linen.initializers import variance_scaling
 from transformers import AutoTokenizer, FlaxBertModel
@@ -76,6 +77,71 @@ def tokenize_goal_prompt(g: jnp.ndarray) -> jnp.ndarray:
     suffix = jnp.full((B, 1), SUFFIX_ID, dtype=jnp.int32)
 
     return jnp.concatenate([prefix, x_tok, comma, y_tok, suffix], axis=-1)
+
+
+def _precompute_all_goal_embeddings(possible_goals: np.ndarray) -> jnp.ndarray:
+    """
+    Precompute SBERT CLS embeddings for a fixed set of goal coordinates.
+
+    Args:
+        possible_goals: (N, 2) numpy array of goal coordinates.
+
+    Returns:
+        (N, 384) JAX array of CLS [SEP] embeddings from frozen SBERT.
+    """
+    all_embs = []
+    for coord in possible_goals:
+        g = jnp.array([[coord[0], coord[1]]])
+        input_ids = tokenize_goal_prompt(g)
+        attention_mask = jnp.ones_like(input_ids)
+        outputs = _SBERT_MODEL(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            params=_SBERT_PARAMS,
+            train=False,
+        )
+        all_embs.append(outputs.last_hidden_state[:, 0])
+    return jnp.concatenate(all_embs, axis=0)
+
+
+class PrecomputedFrozenSentenceBertGoalEncoder(nn.Module):
+    """
+    Fast goal encoder for environments with a finite set of goal positions.
+
+    Precomputes SBERT embeddings for all possible goals once at initialisation,
+    then uses simple nearest-neighbour look-up at training time — no SBERT
+    inference is performed during the training loop.
+
+    Args:
+        output_dim: projection output dimension (default: 64).
+        possible_goals: (N, 2) array of all goal coordinates that may appear.
+    """
+    output_dim: int = 64
+    possible_goals: jnp.ndarray  # (N, 2)
+
+    def setup(self):
+        goals_np = np.asarray(self.possible_goals)
+        self._precomputed_goals = jnp.asarray(goals_np)
+        self._precomputed_embs = _precompute_all_goal_embeddings(goals_np)
+        lecun_uniform = variance_scaling(1 / 3, "fan_in", "uniform")
+        self.proj = nn.Dense(
+            self.output_dim,
+            kernel_init=lecun_uniform,
+            bias_init=nn.initializers.zeros,
+            name="proj",
+        )
+
+    def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
+        # (B, 2) -> nearest precomputed goal -> its embedding
+        dists = jnp.linalg.norm(
+            g[:, None, :] - self._precomputed_goals[None, :, :],
+            axis=-1,
+        )  # (B, N)
+        nearest = jnp.argmin(dists, axis=-1)  # (B,)
+        cls_emb = self._precomputed_embs[nearest]  # (B, 384)
+        x = self.proj(cls_emb)
+        return jax.lax.stop_gradient(x)
+
 
 class FrozenSentenceBertGoalEncoder(nn.Module):
     """
