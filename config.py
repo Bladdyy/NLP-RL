@@ -74,6 +74,8 @@ class Args:
     text_encoder: bool = True
     text_model: str = "minilm"  # "minilm", "bge", "gte", or "e5"
     trainable_embedding: bool = False
+    hybrid_goal_encoder: bool = False
+    text_pooling: str = "cls"  # "cls" or "token"
     tokenization: str = "patches"  # "patches", "semantic", or "per_dim"
     # Transformer-specific config (only used when transformer_mode != "none")
     transformer_embed_dim: int = 144

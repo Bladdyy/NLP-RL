@@ -142,9 +142,10 @@ def _tokenize_goal_prompt_jax(g: jnp.ndarray) -> jnp.ndarray:
 
 def _precompute_all_goal_embeddings(
     possible_goals: np.ndarray, model_key: str,
+    pooling: str = "cls",
 ) -> jnp.ndarray:
     """
-    Precompute CLS embeddings for a fixed set of goal coordinates.
+    Precompute embeddings for a fixed set of goal coordinates.
 
     Runs the HF tokenizer and model once per goal position in plain Python
     so that **no model inference is needed during the training loop**.
@@ -152,9 +153,13 @@ def _precompute_all_goal_embeddings(
     Args:
         possible_goals: (N, 2) numpy array of goal coordinates.
         model_key: short name in MODEL_REGISTRY.
+        pooling: ``"cls"`` (single CLS vector per goal), ``"mean"``
+            (mean over non-padding tokens), or ``"token"`` (all token
+            vectors, padded to the longest sequence).
 
     Returns:
-        (N, embed_dim) JAX array of CLS embeddings.
+        If *pooling* is ``"cls"``: ``(N, embed_dim)`` JAX array.
+        If ``"token"``: ``(N, max_seq_len, embed_dim)`` JAX array.
     """
     tokenizer, model, params = _load_model(model_key)
     embed_dim = MODEL_REGISTRY[model_key]["embed_dim"]
@@ -173,7 +178,14 @@ def _precompute_all_goal_embeddings(
         params=params,
         train=False,
     )
-    return jnp.asarray(outputs.last_hidden_state[:, 0])  # (N, embed_dim)
+    if pooling == "cls":
+        return jnp.asarray(outputs.last_hidden_state[:, 0])  # (N, embed_dim)
+    if pooling == "mean":
+        mask = tokens["attention_mask"]  # (N, seq_len)
+        masked = outputs.last_hidden_state * mask[:, :, None]
+        emb = masked.sum(axis=1) / mask.sum(axis=1, keepdims=True)
+        return jnp.asarray(emb)  # (N, embed_dim)
+    return jnp.asarray(outputs.last_hidden_state)  # (N, seq_len, embed_dim)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -192,15 +204,23 @@ class PrecomputedFrozenTextGoalEncoder(nn.Module):
         output_dim: projection output dimension (default: 64).
         possible_goals: (N, 2) array of all goal coordinates that may appear.
         model_key: short name in MODEL_REGISTRY (default: ``"minilm"``).
+        pooling: ``"cls"`` (single vector per goal), ``"mean"``
+            (mean over non-padding tokens), or ``"token"`` (all
+            token vectors).  ``"token"`` returns ``(B, seq_len, embed_dim)``
+            and no projection is applied; the other two return
+            ``(B, output_dim)``.
     """
     output_dim: int = 64
     possible_goals: jnp.ndarray  # (N, 2)
     model_key: str = "minilm"
+    pooling: str = "cls"
 
     def setup(self):
         goals_np = np.asarray(self.possible_goals)
         self._precomputed_goals = jnp.asarray(goals_np)
-        self._precomputed_embs = _precompute_all_goal_embeddings(goals_np, self.model_key)
+        self._precomputed_embs = _precompute_all_goal_embeddings(
+            goals_np, self.model_key, pooling=self.pooling,
+        )
         lecun_uniform = variance_scaling(1 / 3, "fan_in", "uniform")
         self.proj = nn.Dense(
             self.output_dim,
@@ -210,15 +230,17 @@ class PrecomputedFrozenTextGoalEncoder(nn.Module):
         )
 
     def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
-        # (B, 2) -> nearest precomputed goal -> its embedding
+        # (B, 2) -> nearest precomputed goal -> its embedding(s)
         dists = jnp.linalg.norm(
             g[:, None, :] - self._precomputed_goals[None, :, :],
             axis=-1,
         )  # (B, N)
         nearest = jnp.argmin(dists, axis=-1)  # (B,)
-        cls_emb = self._precomputed_embs[nearest]  # (B, embed_dim)
-        x = self.proj(cls_emb)
-        return jax.lax.stop_gradient(x)
+        embs = self._precomputed_embs[nearest]  # (B, embed_dim) or (B, seq_len, embed_dim)
+        if self.pooling in ("cls", "mean"):
+            return jax.lax.stop_gradient(self.proj(embs))  # (B, output_dim)
+        # token mode: no projection, caller (HybridGoalEncoder) projects each token
+        return jax.lax.stop_gradient(embs)  # (B, seq_len, embed_dim)
 
 
 class FrozenTextGoalEncoder(nn.Module):
@@ -235,10 +257,14 @@ class FrozenTextGoalEncoder(nn.Module):
         model_key: short name in MODEL_REGISTRY (default: ``"minilm"``).
         possible_goals: (N, 2) array for precomputed look-up.  When
             ``None`` (default) the full model is run on every call.
+        pooling: ``"cls"`` (single vector), ``"mean"`` (mean over
+            non-padding tokens), or ``"token"`` (all token vectors —
+            projection skipped, caller projects each token).
     """
     output_dim: int = 64
     model_key: str = "minilm"
     possible_goals: jnp.ndarray | None = None
+    pooling: str = "cls"
 
     @nn.compact
     def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
@@ -247,6 +273,7 @@ class FrozenTextGoalEncoder(nn.Module):
                 output_dim=self.output_dim,
                 possible_goals=self.possible_goals,
                 model_key=self.model_key,
+                pooling=self.pooling,
             )(g)
 
         # ── Direct (non-precomputed) path ────────────────────────────────
@@ -262,13 +289,22 @@ class FrozenTextGoalEncoder(nn.Module):
             params=params,
             train=False,
         )
-        cls_emb = jax.lax.stop_gradient(outputs.last_hidden_state[:, 0])
 
         lecun_uniform = variance_scaling(1 / 3, "fan_in", "uniform")
+        if self.pooling == "cls":
+            emb = jax.lax.stop_gradient(outputs.last_hidden_state[:, 0])
+        elif self.pooling == "mean":
+            masked = outputs.last_hidden_state * attention_mask[:, :, None]
+            emb = masked.sum(axis=1) / attention_mask.sum(axis=1, keepdims=True)
+            emb = jax.lax.stop_gradient(emb)
+        else:
+            # token mode: return all hidden states, caller projects
+            return jax.lax.stop_gradient(outputs.last_hidden_state)
+
         x = nn.Dense(
             self.output_dim,
             kernel_init=lecun_uniform,
             bias_init=nn.initializers.zeros,
             name="proj",
-        )(cls_emb)
+        )(emb)
         return jax.lax.stop_gradient(x)

@@ -210,3 +210,72 @@ To run transformers look at job-transformers.sh, it contains most of the importa
 
 ## Code layout
 Most of the basic transformer code is in modules/ directory, with utils having the base transformer block class.
+
+
+# Goal encoders
+
+The goal encoder produces a 64-dim representation of the target goal that is
+compared (via InfoNCE loss) against the state–action encoder's output.
+Several mutually exclusive options control which encoder is used:
+
+### Frozen pretrained text models (``--text-encoder``)
+
+When enabled (default), the goal is converted to a text prompt
+``\"Your goal is (x,y)\"`` and encoded by a frozen HuggingFace BERT-family model.
+
+The model is selected via ``--text-model``:
+
+| Short name | HuggingFace model | Dim |
+|------------|-------------------|-----|
+| ``minilm`` | sentence-transformers/all-MiniLM-L6-v2 | 384 |
+| ``bge``    | BAAI/bge-small-en-v1.5                 | 384 |
+| ``gte``    | thenlper/gte-small                     | 384 |
+| ``e5``     | intfloat/e5-small-v2                   | 384 |
+
+For maze environments with a finite set of goal positions (e.g. ant-maze-u4
+with 10 goals), embeddings are **precomputed once** at init and looked up
+via nearest-neighbour argmin during training — the model is never run in the
+training loop (saves ~60\% training time).
+
+### Trainable embedding (``--trainable-embedding``)
+
+Replaces the frozen text model with a learned ``nn.Embed`` lookup table.
+Each discrete goal position gets its own trainable vector, optimised
+end-to-end with the critic objective. Only works when the environment
+provides a finite goal set (``possible_goals``).
+
+### Hybrid encoder (``--hybrid-goal-encoder``)
+
+Requires ``--text-encoder true``. Computes a text embedding (frozen or
+trainable) and **concatenates it with the raw (x, y) coordinates** before
+passing through a processing backbone. The backbone is selected
+automatically:
+
+- **MLP backbone** (default or ``--transformer-mode none``):
+  ``[x, y, text_emb]`` concatenated → 256-d hidden → 64-d output.
+
+- **Semantic transformer backbone** (``--transformer-mode StateGoal``
+  or ``Full``): raw coords and text embedding become **two separate tokens**
+  → ``TransformerBackbone`` → 64-d output.
+
+The token granularity is controlled by ``--text-pooling``:
+
+- **``cls``** (default): a single CLS vector is extracted from the frozen
+  text model per goal. The transformer backbone sees **2 tokens** (raw
+  coord + pooled embedding).
+- **``mean``**: mean over all non-padding token vectors. Like ``cls``,
+  produces a single vector — 2 tokens in the backbone. This matches the
+  official sentence-transformers pooling strategy.
+- **``token``**: all BERT token vectors are kept. The transformer backbone
+  sees **1 + seq_len tokens** (raw coord + every word-level token), letting
+  it attend to individual parts of the instruction independently.
+  *(MLP backbone always pools to a single vector first.)*
+
+The text embedding source is controlled by ``--trainable-embedding``:
+
+    # Raw coords + frozen MiniLM → MLP backbone
+    --text-encoder true --hybrid-goal-encoder true
+
+    # Raw coords + trainable embedding → semantic transformer
+    --text-encoder true --hybrid-goal-encoder true \
+        --trainable-embedding true --transformer-mode StateGoal

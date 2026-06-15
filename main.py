@@ -16,7 +16,7 @@ from config import Args
 
 from envs.env_functions import make_env
 from modules.actor import Actor, TransformerActor, SemanticTransformerActor, PerDimTransformerActor, generate_step_functions
-from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, SemanticTransformerGEncoderText, TrainableEmbeddingGoalEncoder, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
+from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, SemanticTransformerGEncoderText, TrainableEmbeddingGoalEncoder, HybridGoalEncoder, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
@@ -162,11 +162,24 @@ if __name__ == "__main__":
         if args.text_model not in {"minilm", "bge", "gte", "e5"}:
             raise ValueError(f"Unknown text_model '{args.text_model}'; "
                              f"choose from minilm, bge, gte, e5")
-        g_encoder = SemanticTransformerGEncoderText(
-            output_dim=64,
-            possible_goals=possible_goals,
-            model_key=args.text_model,
-        )
+        if args.hybrid_goal_encoder and args.text_pooling not in {"cls", "mean", "token"}:
+            raise ValueError(f"Unknown text_pooling '{args.text_pooling}'; "
+                             f"choose from cls, mean, token")
+        if args.hybrid_goal_encoder:
+            g_encoder = HybridGoalEncoder(
+                output_dim=64,
+                backbone="semantic" if g_is_transformer else "mlp",
+                embed_source="trainable" if args.trainable_embedding else "frozen",
+                possible_goals=possible_goals,
+                model_key=args.text_model,
+                pooling=args.text_pooling,
+            )
+        else:
+            g_encoder = SemanticTransformerGEncoderText(
+                output_dim=64,
+                possible_goals=possible_goals,
+                model_key=args.text_model,
+            )
     elif args.trainable_embedding:
         if possible_goals is None:
             raise ValueError(

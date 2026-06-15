@@ -295,6 +295,109 @@ class TrainableEmbeddingGoalEncoder(nn.Module):
         return self.embed(indices)  # (B, output_dim)
 
 
+class HybridGoalEncoder(nn.Module):
+    """
+    Goal encoder that combines raw coordinates with a text embedding.
+
+    Internally computes a text embedding (from a frozen pretrained text
+    model or a trainable lookup) and concatenates it with the raw
+    coordinates before passing through either an MLP or a semantic
+    transformer backbone.
+
+    The external interface stays ``(B, 2) -> (B, output_dim)`` so no
+    changes to ``loss.py`` or ``actor.py`` are needed.
+
+    Pooling modes:
+    * ``"cls"`` (default) — single vector per goal; semantic backbone
+      gets 2 tokens (raw coord + pooled embedding).
+    * ``"token"`` — all BERT token vectors are kept; semantic backbone
+      gets ``1 + seq_len`` tokens (raw coord + every token embedding).
+      The MLP backbone always uses CLS pooling (fixed-size input needed).
+
+    Args:
+        output_dim: final embedding dimension (default: 64).
+        backbone: ``"mlp"`` or ``"semantic"`` — processing backbone.
+        embed_source: ``"frozen"`` (pretrained text model) or
+            ``"trainable"`` (``nn.Embed`` lookup).
+        possible_goals: (N, 2) array for discrete look-up.  Required when
+            *embed_source* is ``"trainable"``; optional for ``"frozen"``
+            (falls back to the direct non-precomputed path).
+        model_key: text model to use when *embed_source* is ``"frozen"``.
+        pooling: ``"cls"`` or ``"token"`` (ignored for MLP / trainable).
+    """
+    output_dim: int = 64
+    backbone: str = "mlp"  # "mlp" or "semantic"
+    embed_source: str = "frozen"  # "frozen" or "trainable"
+    possible_goals: jnp.ndarray | None = None
+    model_key: str = "minilm"
+    pooling: str = "cls"
+
+    @nn.compact
+    def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
+        lecun = variance_scaling(1 / 3, "fan_in", "uniform")
+        bias = nn.initializers.zeros
+        embed_dim = 256
+
+        # ── 1.  Text embedding (or token sequence) ──────────────────────
+        if self.embed_source == "trainable":
+            # Trainable embedder always returns a single vector per goal.
+            text_repr = TrainableEmbeddingGoalEncoder(
+                output_dim=self.output_dim,
+                possible_goals=self.possible_goals,
+            )(g)  # (B, output_dim)
+        else:
+            text_repr = FrozenTextGoalEncoder(
+                output_dim=self.output_dim,
+                model_key=self.model_key,
+                possible_goals=self.possible_goals,
+                pooling=self.pooling,
+            )(g)
+
+        # ── 2.  Backbone ─────────────────────────────────────────────────
+        if self.backbone == "mlp":
+            # MLP needs a fixed-size vector → always pool to single.
+            if text_repr.ndim == 3:  # token mode: (B, seq_len, embed_dim)
+                text_repr = text_repr.mean(axis=1)  # (B, embed_dim)
+            x = jnp.concatenate([g, text_repr], axis=-1)  # (B, 2 + 64)
+            x = nn.Dense(256, kernel_init=lecun, bias_init=bias)(x)
+            x = nn.swish(x)
+            x = nn.Dense(self.output_dim, kernel_init=lecun, bias_init=bias)(x)
+            return x
+
+        # ── Semantic transformer backbone ───────────────────────────────
+        g_token = nn.Dense(
+            embed_dim, kernel_init=lecun, bias_init=bias, name="g_proj",
+        )(g)  # (B, embed_dim)
+
+        if self.pooling == "cls" or self.embed_source == "trainable":
+            # Single vector → one extra token
+            e_token = nn.Dense(
+                embed_dim, kernel_init=lecun, bias_init=bias, name="emb_proj",
+            )(text_repr)  # (B, embed_dim)
+            tokens = jnp.stack([g_token, e_token], axis=1)  # (B, 2, embed_dim)
+        else:
+            # Token mode: project each BERT token to embed_dim
+            e_tokens = nn.Dense(
+                embed_dim, kernel_init=lecun, bias_init=bias, name="emb_proj",
+            )(text_repr)  # (B, seq_len, embed_dim)
+            tokens = jnp.concatenate(
+                [g_token[:, None, :], e_tokens], axis=1,
+            )  # (B, 1 + seq_len, embed_dim)
+
+        x = TransformerBackbone(
+            embed_dim=embed_dim,
+            num_layers=4,
+            num_heads=4,
+            mlp_ratio=4,
+            num_patches=0,
+            dropout_rate=0.0,
+            pooling="cls",
+        )(tokens)
+
+        x = nn.Dense(self.output_dim, kernel_init=lecun, bias_init=bias)(x)
+        return x
+
+
 class SemanticTransformerGEncoder(nn.Module):
     """Goal encoder with a single semantic token.
 
