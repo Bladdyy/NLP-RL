@@ -2,7 +2,8 @@ import flax.linen as nn
 from flax.linen.initializers import variance_scaling
 import jax.numpy as jnp
 from modules.utils import residual_block, TransformerBackbone
-from modules.frozen_text_encoder import FrozenSentenceBertGoalEncoder, PrecomputedFrozenSentenceBertGoalEncoder
+from modules.frozen_text_encoder import FrozenTextGoalEncoder, PrecomputedFrozenTextGoalEncoder
+from modules.frozen_text_encoder import MODEL_REGISTRY  # noqa: F401  (expose for inspection)
 
 class SA_encoder(nn.Module):
     norm_type = "layer_norm"
@@ -245,16 +246,14 @@ class SemanticTransformerGEncoderText(nn.Module):
     """
     output_dim: int = 64
     possible_goals: jnp.ndarray | None = None
+    model_key: str = "minilm"
 
     @nn.compact
     def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
-        if self.possible_goals is not None:
-            return PrecomputedFrozenSentenceBertGoalEncoder(
-                output_dim=self.output_dim,
-                possible_goals=self.possible_goals,
-            )(g)
-        return FrozenSentenceBertGoalEncoder(
+        return FrozenTextGoalEncoder(
             output_dim=self.output_dim,
+            model_key=self.model_key,
+            possible_goals=self.possible_goals,
         )(g)
  
 

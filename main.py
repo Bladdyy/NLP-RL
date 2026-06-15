@@ -159,9 +159,13 @@ if __name__ == "__main__":
     if args.text_encoder:
         if args.goal_end_idx - args.goal_start_idx != 2:
             raise ValueError("text_encoder currently supports only 2D goals")
+        if args.text_model not in {"minilm", "bge", "gte", "e5"}:
+            raise ValueError(f"Unknown text_model '{args.text_model}'; "
+                             f"choose from minilm, bge, gte, e5")
         g_encoder = SemanticTransformerGEncoderText(
             output_dim=64,
             possible_goals=possible_goals,
+            model_key=args.text_model,
         )
     elif g_is_transformer:
         g_encoder = _make_transformer("g_encoder")

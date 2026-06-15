@@ -72,6 +72,7 @@ class Args:
     use_relu: int = 0
     transformer_mode: Literal["none", "Full", "State", "StateGoal", "StateActor"] = "none"
     text_encoder: bool = True
+    text_model: str = "minilm"  # "minilm", "bge", "gte", or "e5"
     tokenization: str = "patches"  # "patches", "semantic", or "per_dim"
     # Transformer-specific config (only used when transformer_mode != "none")
     transformer_embed_dim: int = 144
