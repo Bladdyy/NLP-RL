@@ -190,8 +190,8 @@ class PrecomputedFrozenTextGoalEncoder(nn.Module):
         model_key: short name in MODEL_REGISTRY (default: ``"minilm"``).
         pooling: ``"cls"``, ``"mean"``, or ``"token"`` (default: ``"cls"``).
     """
-    output_dim: int = 64
     possible_goals: jnp.ndarray  # (N, 2)
+    output_dim: int = 64
     model_key: str = "minilm"
     pooling: str = "cls"
 

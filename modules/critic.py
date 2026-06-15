@@ -273,8 +273,8 @@ class TrainableEmbeddingGoalEncoder(nn.Module):
         possible_goals: (N, 2) array of all goal coordinates that may
             appear during training.
     """
-    output_dim: int = 64
     possible_goals: jnp.ndarray  # (N, 2)
+    output_dim: int = 64
 
     def setup(self):
         self._precomputed_goals = jnp.asarray(self.possible_goals)
@@ -359,9 +359,9 @@ class HybridGoalEncoder(nn.Module):
                 # Frozen encoder has 384-dim BERT → project to mlp_width
                 # to avoid a 384→64→256 information bottleneck.
                 text_repr = PrecomputedFrozenTextGoalEncoder(
+                    possible_goals=self.possible_goals,
                     output_dim=self.mlp_width,
                     model_key=self.model_key,
-                    possible_goals=self.possible_goals,
                     pooling=self.pooling,
                 )(g)
             # MLP needs a fixed-size vector → pool to single if 3D.
@@ -379,14 +379,14 @@ class HybridGoalEncoder(nn.Module):
         # ── Semantic transformer backbone ───────────────────────────────
         if self.embed_source == "trainable":
             text_repr = TrainableEmbeddingGoalEncoder(
-                output_dim=self.transformer_embed_dim,
                 possible_goals=self.possible_goals,
+                output_dim=self.transformer_embed_dim,
             )(g)
         else:
             text_repr = PrecomputedFrozenTextGoalEncoder(
+                possible_goals=self.possible_goals,
                 output_dim=self.transformer_embed_dim,
                 model_key=self.model_key,
-                possible_goals=self.possible_goals,
                 pooling=self.pooling,
             )(g)
 
