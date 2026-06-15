@@ -16,7 +16,7 @@ from config import Args
 
 from envs.env_functions import make_env
 from modules.actor import Actor, TransformerActor, SemanticTransformerActor, PerDimTransformerActor, generate_step_functions
-from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, SemanticTransformerGEncoderText, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
+from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, SemanticTransformerGEncoderText, TrainableEmbeddingGoalEncoder, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
@@ -166,6 +166,16 @@ if __name__ == "__main__":
             output_dim=64,
             possible_goals=possible_goals,
             model_key=args.text_model,
+        )
+    elif args.trainable_embedding:
+        if possible_goals is None:
+            raise ValueError(
+                "trainable_embedding requires a finite goal set; "
+                "the environment must expose possible_goals"
+            )
+        g_encoder = TrainableEmbeddingGoalEncoder(
+            output_dim=64,
+            possible_goals=possible_goals,
         )
     elif g_is_transformer:
         g_encoder = _make_transformer("g_encoder")

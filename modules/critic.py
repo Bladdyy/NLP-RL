@@ -255,7 +255,45 @@ class SemanticTransformerGEncoderText(nn.Module):
             model_key=self.model_key,
             possible_goals=self.possible_goals,
         )(g)
- 
+
+
+class TrainableEmbeddingGoalEncoder(nn.Module):
+    """
+    Trainable embedding layer for discrete goal positions.
+
+    Maps each (x, y) goal to a learned dense vector via a lookup table
+    (``nn.Embed``).  Only applicable when the goal space is finite, i.e.
+    when *possible_goals* is known — typically ant-maze environments.
+
+    Unlike the frozen-text encoders, the embedding weights **are trained**
+    end-to-end with the critic objective.
+
+    Args:
+        output_dim: embedding dimension (default: 64).
+        possible_goals: (N, 2) array of all goal coordinates that may
+            appear during training.
+    """
+    output_dim: int = 64
+    possible_goals: jnp.ndarray  # (N, 2)
+
+    def setup(self):
+        self._precomputed_goals = jnp.asarray(self.possible_goals)
+        n_goals = self.possible_goals.shape[0]
+        self.embed = nn.Embed(
+            num_embeddings=n_goals,
+            features=self.output_dim,
+            name="goal_embed",
+        )
+
+    def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
+        # (B, 2) -> nearest goal index -> trainable embedding
+        dists = jnp.linalg.norm(
+            g[:, None, :] - self._precomputed_goals[None, :, :],
+            axis=-1,
+        )  # (B, N)
+        indices = jnp.argmin(dists, axis=-1)  # (B,)
+        return self.embed(indices)  # (B, output_dim)
+
 
 class SemanticTransformerGEncoder(nn.Module):
     """Goal encoder with a single semantic token.
