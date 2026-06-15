@@ -25,14 +25,14 @@ uv run main.py \
   --transformer_num_heads 4 \
   --transformer_mlp_ratio 4 \
   --transformer_num_patches 8 \
-  --transformer_dropout 0.1 \
+  --transformer_dropout 0.0 \
   --transformer_pooling cls \
   --tokenization semantic \
   --grad_clip_max_norm 15.0 \
   --transformer_lr 1e-4 \
-  --transformer_weight_decay 1e-2 \
+  --transformer_weight_decay 1e-4 \
   --loss_temperature 0.1 \
-  --entropy_param 1.0
+  --entropy_param 0.5
 
  echo "Finished"
                    
