@@ -252,7 +252,8 @@ passing through a processing backbone. The backbone is selected
 automatically:
 
 - **MLP backbone** (default or ``--transformer-mode none``):
-  ``[x, y, text_emb]`` concatenated → 256-d hidden → 64-d output.
+For trainable embedding 64-d text_emb, for Frozen 256
+  ``[x, y, text_emb]`` concatenated → 256-d hidden.
 
 - **Semantic transformer backbone** (``--transformer-mode StateGoal``
   or ``Full``): raw coords and text embedding become **two separate tokens**
@@ -269,7 +270,7 @@ The token granularity is controlled by ``--text-pooling``:
 - **``token``**: all BERT token vectors are kept. The transformer backbone
   sees **1 + seq_len tokens** (raw coord + every word-level token), letting
   it attend to individual parts of the instruction independently.
-  *(MLP backbone always pools to a single vector first.)*
+  *(MLP backbone always pools to a single vector first, no point in running token on it.)*
 
 The text embedding source is controlled by ``--trainable-embedding``:
 

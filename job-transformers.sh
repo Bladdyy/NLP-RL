@@ -1,4 +1,12 @@
 #!/bin/bash
+#
+#SBATCH --job-name=nlp
+#SBATCH --partition=a100
+#SBATCH --qos=jh479001_a100
+#SBATCH --gres=gpu:1
+#SBATCH --output=logs/slurm-nlp.txt
+#SBATCH --error=logs/slurm-nlp-error.txt
+#SBATCH --time=16:00:00
 echo "Started"
 
 set -eux

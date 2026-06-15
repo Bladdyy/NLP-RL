@@ -17,6 +17,7 @@ Two execution paths exist:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import jax
@@ -27,10 +28,7 @@ from flax.linen.initializers import variance_scaling
 from transformers import AutoTokenizer, FlaxBertModel
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 1.  Model registry  (add new models here)
-# ═══════════════════════════════════════════════════════════════════════════
-
+# ── Model registry ────────────────────────────────────────────────────────
 MODEL_REGISTRY: dict[str, dict[str, Any]] = {
     "minilm": {
         "hf_name": "sentence-transformers/all-MiniLM-L6-v2",
@@ -62,43 +60,43 @@ def _load_model(model_key: str) -> tuple[Any, FlaxBertModel, dict]:
         try:
             model = FlaxBertModel.from_pretrained(hf_name, dtype=jnp.float32)
         except Exception:
-            # Some models only have PyTorch weights uploaded; convert to Flax.
+            # Fall back to PyTorch → Flax conversion if no native Flax weights
             model = FlaxBertModel.from_pretrained(hf_name, dtype=jnp.float32, from_pt=True)
         _MODEL_CACHE[model_key] = (tokenizer, model, model.params)
     return _MODEL_CACHE[model_key]
 
 
-# Warm the cache with the default model so module imports are instant.
+# Pre-load "minilm" by default so that import still works instantly.
 _DEFAULT_KEY = "minilm"
+
 _TOKENIZER, _SBERT_MODEL, _SBERT_PARAMS = _load_model(_DEFAULT_KEY)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 2.  Manual tokenisation  (JAX-compatible — for the direct path only)
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Token-ID constants (identical across all four models) ─────────────────
 
-# Token IDs are identical across all four supported models (BERT WordPiece).
-_PREFIX_IDS = jnp.array(
+PREFIX_IDS = jnp.array(
     _TOKENIZER("Your goal is (", add_special_tokens=False).input_ids,
     dtype=jnp.int32,
 )
-_COMMA_ID  = jnp.int32(_TOKENIZER(",", add_special_tokens=False).input_ids[0])
-_SUFFIX_ID = jnp.int32(_TOKENIZER(")", add_special_tokens=False).input_ids[0])
-_DOT_ID    = jnp.int32(_TOKENIZER(".", add_special_tokens=False).input_ids[0])
-_PLUS_ID   = jnp.int32(_TOKENIZER("+", add_special_tokens=False).input_ids[0])
-_MINUS_ID  = jnp.int32(_TOKENIZER("-", add_special_tokens=False).input_ids[0])
-_DIGIT_IDS = jnp.array(
+COMMA_ID  = jnp.int32(_TOKENIZER(",", add_special_tokens=False).input_ids[0])
+SUFFIX_ID = jnp.int32(_TOKENIZER(")", add_special_tokens=False).input_ids[0])
+DOT_ID    = jnp.int32(_TOKENIZER(".", add_special_tokens=False).input_ids[0])
+PLUS_ID   = jnp.int32(_TOKENIZER("+", add_special_tokens=False).input_ids[0])
+MINUS_ID  = jnp.int32(_TOKENIZER("-", add_special_tokens=False).input_ids[0])
+DIGIT_IDS = jnp.array(
     [_TOKENIZER(str(d), add_special_tokens=False).input_ids[0] for d in range(10)],
     dtype=jnp.int32,
 )
 
+
+# ── JAX-compatible tokenisation (works for all BERT-family tokenizers) ────
 
 def _coord_token_ids(coord: jnp.ndarray) -> jnp.ndarray:
     """
     (B,) -> (B, 6): [sign, tens, ones, dot, frac_tens, frac_ones]
     e.g. -12.34 -> [MINUS, 1, 2, DOT, 3, 4]
     """
-    sign    = jnp.where(coord < 0.0, _MINUS_ID, _PLUS_ID)
+    sign    = jnp.where(coord < 0.0, MINUS_ID, PLUS_ID)
     scaled  = jnp.clip(jnp.round(jnp.abs(coord) * 100.0), 0.0, 9999.0).astype(jnp.int32)
     integer = jnp.clip(scaled // 100, 0, 99)
     frac    = scaled % 100
@@ -106,39 +104,34 @@ def _coord_token_ids(coord: jnp.ndarray) -> jnp.ndarray:
     return jnp.stack(
         [
             sign,
-            _DIGIT_IDS[integer // 10],
-            _DIGIT_IDS[integer % 10],
-            jnp.full(sign.shape, _DOT_ID, dtype=jnp.int32),
-            _DIGIT_IDS[frac // 10],
-            _DIGIT_IDS[frac % 10],
+            DIGIT_IDS[integer // 10],
+            DIGIT_IDS[integer % 10],
+            jnp.full(sign.shape, DOT_ID, dtype=jnp.int32),
+            DIGIT_IDS[frac // 10],
+            DIGIT_IDS[frac % 10],
         ],
         axis=-1,
-    )
+    )  # (B, 6)
 
 
-def _tokenize_goal_prompt_jax(g: jnp.ndarray) -> jnp.ndarray:
+def tokenize_goal_prompt(g: jnp.ndarray) -> jnp.ndarray:
     """
-    JAX-compatible tokenisation of ``"Your goal is (±XX.XX,±XX.XX)"``.
-
     (B, 2) -> (B, prefix_len + 6 + 1 + 6 + 1)
-
-    This avoids calling the Python-only HF tokenizer inside JIT.
+    representing "Your goal is (±XX.XX,±XX.XX)"
     """
     assert g.ndim == 2 and g.shape[-1] == 2, "g must be (B, 2)"
     B = g.shape[0]
 
-    prefix = jnp.tile(_PREFIX_IDS[None, :], (B, 1))
+    prefix = jnp.tile(PREFIX_IDS[None, :], (B, 1))
     x_tok  = _coord_token_ids(g[:, 0])
-    comma  = jnp.full((B, 1), _COMMA_ID, dtype=jnp.int32)
+    comma  = jnp.full((B, 1), COMMA_ID,  dtype=jnp.int32)
     y_tok  = _coord_token_ids(g[:, 1])
-    suffix = jnp.full((B, 1), _SUFFIX_ID, dtype=jnp.int32)
+    suffix = jnp.full((B, 1), SUFFIX_ID, dtype=jnp.int32)
 
     return jnp.concatenate([prefix, x_tok, comma, y_tok, suffix], axis=-1)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 3.  Precomputation  (uses the HF tokenizer on strings — Python, not JIT)
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Precomputation helper ────────────────────────────────────────────────
 
 def _precompute_all_goal_embeddings(
     possible_goals: np.ndarray, model_key: str,
@@ -147,50 +140,39 @@ def _precompute_all_goal_embeddings(
     """
     Precompute embeddings for a fixed set of goal coordinates.
 
-    Runs the HF tokenizer and model once per goal position in plain Python
-    so that **no model inference is needed during the training loop**.
-
     Args:
         possible_goals: (N, 2) numpy array of goal coordinates.
         model_key: short name in MODEL_REGISTRY.
-        pooling: ``"cls"`` (single CLS vector per goal), ``"mean"``
-            (mean over non-padding tokens), or ``"token"`` (all token
-            vectors, padded to the longest sequence).
+        pooling: ``"cls"``, ``"mean"``, or ``"token"``.
 
     Returns:
-        If *pooling* is ``"cls"``: ``(N, embed_dim)`` JAX array.
-        If ``"token"``: ``(N, max_seq_len, embed_dim)`` JAX array.
+        ``(N, embed_dim)`` for cls/mean, ``(N, seq_len, embed_dim)`` for token.
     """
-    tokenizer, model, params = _load_model(model_key)
+    _, model, params = _load_model(model_key)
     embed_dim = MODEL_REGISTRY[model_key]["embed_dim"]
-
-    # Build prompt strings — use natural number formatting for better
-    # alignment with what the model saw during pre-training.
-    prompts = [f"Your goal is ({x:.1f},{y:.1f})" for x, y in possible_goals]
-
-    tokens = tokenizer(
-        prompts, return_tensors="np", padding=True, truncation=True,
-    )
-
-    outputs = model(
-        input_ids=tokens["input_ids"],
-        attention_mask=tokens["attention_mask"],
-        params=params,
-        train=False,
-    )
-    if pooling == "cls":
-        return jnp.asarray(outputs.last_hidden_state[:, 0])  # (N, embed_dim)
-    if pooling == "mean":
-        mask = tokens["attention_mask"]  # (N, seq_len)
-        masked = outputs.last_hidden_state * mask[:, :, None]
-        emb = masked.sum(axis=1) / mask.sum(axis=1, keepdims=True)
-        return jnp.asarray(emb)  # (N, embed_dim)
-    return jnp.asarray(outputs.last_hidden_state)  # (N, seq_len, embed_dim)
+    all_embs = []
+    for coord in possible_goals:
+        g = jnp.array([[coord[0], coord[1]]])
+        input_ids = tokenize_goal_prompt(g)
+        attention_mask = jnp.ones_like(input_ids)
+        outputs = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            params=params,
+            train=False,
+        )
+        if pooling == "cls":
+            all_embs.append(outputs.last_hidden_state[:, 0])  # (1, embed_dim)
+        elif pooling == "mean":
+            masked = outputs.last_hidden_state * attention_mask[:, :, None]
+            emb = masked.sum(axis=1) / attention_mask.sum(axis=1, keepdims=True)
+            all_embs.append(emb)  # (1, embed_dim)
+        else:
+            all_embs.append(outputs.last_hidden_state)  # (1, seq_len, embed_dim)
+    return jnp.concatenate(all_embs, axis=0)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 4.  Encoder classes
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Encoder classes ──────────────────────────────────────────────────────
 
 class PrecomputedFrozenTextGoalEncoder(nn.Module):
     """
@@ -200,15 +182,14 @@ class PrecomputedFrozenTextGoalEncoder(nn.Module):
     initialisation, then uses nearest-neighbour look-up at training time
     — no transformer inference is performed in the training loop.
 
+    All pooling modes project to *output_dim* so the caller always receives
+    ``(B, output_dim)`` (cls/mean) or ``(B, seq_len, output_dim)`` (token).
+
     Args:
         output_dim: projection output dimension (default: 64).
         possible_goals: (N, 2) array of all goal coordinates that may appear.
         model_key: short name in MODEL_REGISTRY (default: ``"minilm"``).
-        pooling: ``"cls"`` (single vector per goal), ``"mean"``
-            (mean over non-padding tokens), or ``"token"`` (all
-            token vectors).  ``"token"`` returns ``(B, seq_len, embed_dim)``
-            and no projection is applied; the other two return
-            ``(B, output_dim)``.
+        pooling: ``"cls"``, ``"mean"``, or ``"token"`` (default: ``"cls"``).
     """
     output_dim: int = 64
     possible_goals: jnp.ndarray  # (N, 2)
@@ -230,36 +211,35 @@ class PrecomputedFrozenTextGoalEncoder(nn.Module):
         )
 
     def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
-        # (B, 2) -> nearest precomputed goal -> its embedding(s)
+        # (B, 2) -> nearest precomputed goal -> its embedding
         dists = jnp.linalg.norm(
             g[:, None, :] - self._precomputed_goals[None, :, :],
             axis=-1,
         )  # (B, N)
         nearest = jnp.argmin(dists, axis=-1)  # (B,)
         embs = self._precomputed_embs[nearest]  # (B, embed_dim) or (B, seq_len, embed_dim)
-        if self.pooling in ("cls", "mean"):
-            return jax.lax.stop_gradient(self.proj(embs))  # (B, output_dim)
-        # token mode: no projection, caller (HybridGoalEncoder) projects each token
-        return jax.lax.stop_gradient(embs)  # (B, seq_len, embed_dim)
+        return jax.lax.stop_gradient(self.proj(embs))
 
 
 class FrozenTextGoalEncoder(nn.Module):
     """
-    Encodes a 2D goal via a frozen HuggingFace text model.
+    Encodes a 2D goal as "Your goal is (x,y)" via a frozen HuggingFace
+    text model, then projects to *output_dim*.
 
-    When *possible_goals* is provided, uses the fast precomputed path
-    (``PrecomputedFrozenTextGoalEncoder``).  Otherwise falls back to
-    running the full frozen model every forward pass — slower, but
-    does not require a known goal set.
+    When *possible_goals* is provided, the fast precomputed path is used
+    automatically. Otherwise the full frozen model is run each forward
+    pass (slower but general).
+
+    All pooling modes project to *output_dim*.  ``"token"`` mode returns
+    ``(B, seq_len, output_dim)``; cls/mean return ``(B, output_dim)``.
 
     Args:
         output_dim: projection output dimension (default: 64).
         model_key: short name in MODEL_REGISTRY (default: ``"minilm"``).
-        possible_goals: (N, 2) array for precomputed look-up.  When
+        possible_goals: (N, 2) array for precomputed look-up. When
             ``None`` (default) the full model is run on every call.
-        pooling: ``"cls"`` (single vector), ``"mean"`` (mean over
-            non-padding tokens), or ``"token"`` (all token vectors —
-            projection skipped, caller projects each token).
+            When set, ``PrecomputedFrozenTextGoalEncoder`` is used.
+        pooling: ``"cls"``, ``"mean"``, or ``"token"`` (default: ``"cls"``).
     """
     output_dim: int = 64
     model_key: str = "minilm"
@@ -276,11 +256,17 @@ class FrozenTextGoalEncoder(nn.Module):
                 pooling=self.pooling,
             )(g)
 
-        # ── Direct (non-precomputed) path ────────────────────────────────
+        logging.warning(
+            "FrozenTextGoalEncoder: possible_goals is None, falling back to the "
+            "slow direct path (full BERT inference every forward pass). "
+            "Provide possible_goals to use the fast precomputed path."
+        )
+
+        # --- Direct (non-precomputed) path ---
         _, model, _ = _load_model(self.model_key)
         params = self.param("model_params", lambda _: _load_model(self.model_key)[2])
 
-        input_ids      = _tokenize_goal_prompt_jax(g)
+        input_ids      = tokenize_goal_prompt(g)
         attention_mask = jnp.ones_like(input_ids)
 
         outputs = model(
@@ -298,8 +284,8 @@ class FrozenTextGoalEncoder(nn.Module):
             emb = masked.sum(axis=1) / attention_mask.sum(axis=1, keepdims=True)
             emb = jax.lax.stop_gradient(emb)
         else:
-            # token mode: return all hidden states, caller projects
-            return jax.lax.stop_gradient(outputs.last_hidden_state)
+            # token: (B, seq_len, 384) → project to output_dim
+            emb = jax.lax.stop_gradient(outputs.last_hidden_state)
 
         x = nn.Dense(
             self.output_dim,

@@ -173,6 +173,8 @@ if __name__ == "__main__":
                 possible_goals=possible_goals,
                 model_key=args.text_model,
                 pooling=args.text_pooling,
+                mlp_width=args.critic_network_width,
+                transformer_embed_dim=args.transformer_embed_dim,
             )
         else:
             g_encoder = SemanticTransformerGEncoderText(
