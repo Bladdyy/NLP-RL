@@ -149,7 +149,6 @@ def _precompute_all_goal_embeddings(
         ``(N, embed_dim)`` for cls/mean, ``(N, seq_len, embed_dim)`` for token.
     """
     _, model, params = _load_model(model_key)
-    embed_dim = MODEL_REGISTRY[model_key]["embed_dim"]
     all_embs = []
     for coord in possible_goals:
         g = jnp.array([[coord[0], coord[1]]])

@@ -27,7 +27,7 @@ uv run main.py \
   --batch_size 512 \
   --min_replay_size 1000 \
   --max_replay_size 100_000 \
-  --transformer_mode StateActor \
+  --transformer_mode none \
   --transformer_embed_dim 144\
   --transformer_num_layers 2 \
   --transformer_num_heads 4 \
@@ -39,8 +39,12 @@ uv run main.py \
   --grad_clip_max_norm 15.0 \
   --transformer_lr 1e-4 \
   --transformer_weight_decay 1e-4 \
-  --loss_temperature 0.1 \
-  --entropy_param 0.5
+  --entropy_param 0.5 \
+  --text_encoder \
+  --text_model "minilm" \
+  --hybrid_goal_encoder \
+  --text_pooling "cls" \
+  --trainable_embeddings
 
  echo "Finished"
                    

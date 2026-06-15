@@ -247,30 +247,47 @@ provides a finite goal set (``possible_goals``).
 ### Hybrid encoder (``--hybrid-goal-encoder``)
 
 Requires ``--text-encoder true``. Computes a text embedding (frozen or
-trainable) and **concatenates it with the raw (x, y) coordinates** before
+trainable) and **combines it with the raw (x, y) coordinates** before
 passing through a processing backbone. The backbone is selected
-automatically:
+automatically based on ``--transformer-mode``:
 
-- **MLP backbone** (default or ``--transformer-mode none``):
-For trainable embedding 64-d text_emb, for Frozen 256
-  ``[x, y, text_emb]`` concatenated → 256-d hidden.
+**Dimension flow (frozen text model — 384-dim BERT → projected):**
 
-- **Semantic transformer backbone** (``--transformer-mode StateGoal``
-  or ``Full``): raw coords and text embedding become **two separate tokens**
-  → ``TransformerBackbone`` → 64-d output.
+| Backbone | Embed source | Text encoder ``output_dim`` | Concatenation | Hidden dim | Output dim |
+|----------|-------------|----------------------------|---------------|------------|------------|
+| MLP | Frozen | ``mlp_width`` (256) | ``g_proj(64) + text_repr(256) → 320`` | 256 | 64 |
+| MLP | Trainable | ``mlp_width`` (256) | ``g_proj(64) + text_repr(256) → 320`` | 256 | 64 |
+| Transformer | Frozen | ``transformer_embed_dim`` (144) | stacked as 2 tokens ← ``g_token(144), text_repr(144)`` | 144 | 64 |
+| Transformer | Trainable | ``transformer_embed_dim`` (144) | stacked as 2 tokens ← ``g_token(144), text_repr(144)`` | 144 | 64 |
 
-The token granularity is controlled by ``--text-pooling``:
+**Frozen path** (``--text-encoder true --trainable-embedding false``):
+The BERT model outputs 384-dim embeddings which are projected to
+``output_dim`` (matching the backbone width) via a learned ``nn.Dense``.
+This avoids a 384→64→256 information bottleneck in the MLP case.
 
-- **``cls``** (default): a single CLS vector is extracted from the frozen
-  text model per goal. The transformer backbone sees **2 tokens** (raw
-  coord + pooled embedding).
-- **``mean``**: mean over all non-padding token vectors. Like ``cls``,
-  produces a single vector — 2 tokens in the backbone. This matches the
-  official sentence-transformers pooling strategy.
-- **``token``**: all BERT token vectors are kept. The transformer backbone
-  sees **1 + seq_len tokens** (raw coord + every word-level token), letting
-  it attend to individual parts of the instruction independently.
-  *(MLP backbone always pools to a single vector first, no point in running token on it.)*
+**Trainable path** (``--trainable-embedding true``):
+An ``nn.Embed`` lookup table produces vectors of size ``output_dim``
+directly — no intermediate 384-dim representation. The dimension matches
+the backbone width so both paths are comparable.
+
+**MLP backbone** (default or ``--transformer-mode none``):
+Raw coords ``(x, y)`` are first projected to 64 dims (``g_proj``) so they
+don't get drowned by the high-dim text representation. The projected coords
+and the text embedding are concatenated and processed by a 2-layer MLP:
+``Dense(mlp_width) → swish → Dense(64)``.
+
+**Semantic transformer backbone** (``--transformer-mode StateGoal``
+or ``Full``):
+Raw coords are projected to ``transformer_embed_dim`` via ``Dense`` and
+**stacked as separate tokens** alongside the text embedding, giving the
+``TransformerBackbone`` two (or ``1 + seq_len``) tokens to attend to.
+
+Pooling is controlled by ``--text-pooling``:
+
+- **``cls``** (default): single CLS vector per goal — 2 tokens.
+- **``mean``**: mean over all non-padding tokens — 2 tokens.
+- **``token``**: all BERT token vectors kept — ``1 + seq_len`` tokens in
+  the transformer backbone. The MLP backbone mean-pools to a single vector.
 
 The text embedding source is controlled by ``--trainable-embedding``:
 
