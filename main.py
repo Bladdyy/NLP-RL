@@ -16,7 +16,8 @@ from config import Args
 
 from envs.env_functions import make_env
 from modules.actor import Actor, TransformerActor, SemanticTransformerActor, PerDimTransformerActor, generate_step_functions
-from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, SemanticTransformerGEncoderText, TrainableEmbeddingGoalEncoder, HybridGoalEncoder, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
+from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
+from modules.goal_encoders import SemanticTransformerGEncoderText, TrainableEmbeddingGoalEncoder, HybridGoalEncoder
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
