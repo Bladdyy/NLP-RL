@@ -17,7 +17,7 @@ from config import Args
 from envs.env_functions import make_env
 from modules.actor import Actor, TransformerActor, SemanticTransformerActor, PerDimTransformerActor, generate_step_functions
 from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
-from modules.goal_encoders import SemanticTransformerGEncoderText, TrainableEmbeddingGoalEncoder, HybridGoalEncoder
+from modules.goal_encoders import SemanticTransformerGEncoderText, HybridGoalEncoder
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
@@ -157,43 +157,45 @@ if __name__ == "__main__":
         sa_encoder = _make_transformer("sa_encoder")
     else:
         sa_encoder = SA_encoder(network_width=args.critic_network_width, network_depth=args.critic_depth, skip_connections=args.critic_skip_connections, use_relu=args.use_relu)
+    # Validate that text_encoder and trainable_embedding are mutually exclusive
+    if args.text_encoder and args.trainable_embedding:
+        raise ValueError(
+            "text_encoder and trainable_embedding are mutually exclusive; "
+            "set at most one to True"
+        )
+
     if args.text_encoder:
         if args.goal_end_idx - args.goal_start_idx != 2:
             raise ValueError("text_encoder currently supports only 2D goals")
         if args.text_model not in {"minilm", "bge", "gte", "e5"}:
             raise ValueError(f"Unknown text_model '{args.text_model}'; "
                              f"choose from minilm, bge, gte, e5")
-        if args.hybrid_goal_encoder and args.text_pooling not in {"cls", "mean", "token"}:
+
+    if args.hybrid_goal_encoder:
+        if args.text_pooling not in {"cls", "mean", "token"}:
             raise ValueError(f"Unknown text_pooling '{args.text_pooling}'; "
                              f"choose from cls, mean, token")
-        if args.hybrid_goal_encoder:
-            g_encoder = HybridGoalEncoder(
-                output_dim=64,
-                backbone="semantic" if g_is_transformer else "mlp",
-                embed_source="trainable" if args.trainable_embedding else "frozen",
-                possible_goals=possible_goals,
-                model_key=args.text_model,
-                pooling=args.text_pooling,
-                mlp_width=args.critic_network_width,
-                transformer_embed_dim=args.transformer_embed_dim,
-                description_type=args.description_type,
-            )
-        else:
-            g_encoder = SemanticTransformerGEncoderText(
-                output_dim=64,
-                possible_goals=possible_goals,
-                model_key=args.text_model,
-                description_type=args.description_type,
-            )
-    elif args.trainable_embedding:
-        if possible_goals is None:
-            raise ValueError(
-                "trainable_embedding requires a finite goal set; "
-                "the environment must expose possible_goals"
-            )
-        g_encoder = TrainableEmbeddingGoalEncoder(
+        embed_source = "frozen" if args.text_encoder else "trainable"
+        g_encoder = HybridGoalEncoder(
+            output_dim=64,
+            backbone="semantic" if g_is_transformer else "mlp",
+            embed_source=embed_source,
+            possible_goals=possible_goals,
+            model_key=args.text_model,
+            pooling=args.text_pooling,
+            mlp_width=args.critic_network_width,
+            transformer_embed_dim=args.transformer_embed_dim,
+            description_type=args.description_type,
+        )
+    elif args.text_encoder or args.trainable_embedding:
+        embed_source = "frozen" if args.text_encoder else "trainable"
+        g_encoder = SemanticTransformerGEncoderText(
             output_dim=64,
             possible_goals=possible_goals,
+            model_key=args.text_model,
+            embed_source=embed_source,
+            description_type=args.description_type,
+            pooling=args.text_pooling,
         )
     elif g_is_transformer:
         g_encoder = _make_transformer("g_encoder")

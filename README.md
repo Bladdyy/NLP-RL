@@ -215,15 +215,36 @@ Most of the basic transformer code is in modules/ directory, with utils having t
 # Goal encoders
 
 The goal encoder produces a 64-dim representation of the target goal that is
-compared (via InfoNCE loss) against the state–action encoder's output.
-Several mutually exclusive options control which encoder is used:
+compared (via InfoNCE loss) against the state–action encoder's output. Three
+flags control which encoder is used:
 
-### Frozen pretrained text models (``--text-encoder``)
+| Flag | Type | Description |
+|------|------|-------------|
+| `--text-encoder` | bool | Encode goal via a frozen pretrained text model (e.g. MiniLM) |
+| `--trainable-embedding` | bool | Encode goal via a learned `nn.Embed` lookup table (finite goal sets only) |
+| `--hybrid-goal-encoder` | bool | Combine raw (x, y) coordinates **with** a text/trainable embedding |
 
-When enabled (default), the goal is converted to a text prompt
-``\"Your goal is (x,y)\"`` and encoded by a frozen HuggingFace BERT-family model.
+### Mutual exclusivity
 
-The model is selected via ``--text-model``:
+`--text-encoder` and `--trainable-embedding` are **mutually exclusive** —
+setting both raises an error. `--hybrid-goal-encoder` is complementary and
+can be used with either.
+
+### Routing table
+
+| `text_encoder` | `trainable_embedding` | `hybrid_goal_encoder` | Goal encoder used |
+|---|---|---|---|
+| `True` | `True` | *any* | **Error** — mutually exclusive |
+| `True` | `False` | `False` | `SemanticTransformerGEncoderText` with `embed_source="frozen"` |
+| `True` | `False` | `True` | `HybridGoalEncoder` with `embed_source="frozen"` |
+| `False` | `True` | `False` | `SemanticTransformerGEncoderText` with `embed_source="trainable"` |
+| `False` | `True` | `True` | `HybridGoalEncoder` with `embed_source="trainable"` |
+| `False` | `False` | *any* | `G_encoder` / `TransformerGEncoder` (raw coords MLP/transformer) |
+
+### Frozen pretrained text models (`--text-encoder`)
+
+The goal is converted to a text prompt ``"Your goal is (x,y)"`` and encoded
+by a frozen HuggingFace BERT-family model, selected via ``--text-model``:
 
 | Short name | HuggingFace model | Dim |
 |------------|-------------------|-----|
@@ -232,26 +253,32 @@ The model is selected via ``--text-model``:
 | ``gte``    | thenlper/gte-small                     | 384 |
 | ``e5``     | intfloat/e5-small-v2                   | 384 |
 
-For maze environments with a finite set of goal positions (e.g. ant-maze-u4
-with 10 goals), embeddings are **precomputed once** at init and looked up
-via nearest-neighbour argmin during training — the model is never run in the
-training loop (saves ~60\% training time).
+For maze environments with a finite set of goal positions, embeddings are
+**precomputed once** at init and looked up via nearest-neighbour argmin
+during training (``PrecomputedFrozenTextGoalEncoder``) — the model is never
+run in the training loop.
 
-### Trainable embedding (``--trainable-embedding``)
+Without ``--hybrid-goal-encoder``, ``SemanticTransformerGEncoderText`` wraps
+the frozen text encoder and projects its output to 64 dims.
+
+### Trainable embedding (`--trainable-embedding`)
 
 Replaces the frozen text model with a learned ``nn.Embed`` lookup table.
 Each discrete goal position gets its own trainable vector, optimised
-end-to-end with the critic objective. Only works when the environment
-provides a finite goal set (``possible_goals``).
+end-to-end with the critic objective. Requires a finite goal set
+(``possible_goals`` exposed by the environment).
 
-### Hybrid encoder (``--hybrid-goal-encoder``)
+Without ``--hybrid-goal-encoder``, ``TrainableEmbeddingGoalEncoder`` is used
+directly.
 
-Requires ``--text-encoder true``. Computes a text embedding (frozen or
-trainable) and **combines it with the raw (x, y) coordinates** before
-passing through a processing backbone. The backbone is selected
-automatically based on ``--transformer-mode``:
+### Hybrid encoder (`--hybrid-goal-encoder`)
 
-**Dimension flow (frozen text model — 384-dim BERT → projected):**
+Computes an embedding (frozen text *or* trainable lookup, depending on
+``--text-encoder`` / ``--trainable-embedding``) and **combines it with the
+raw (x, y) coordinates** before passing through a processing backbone.
+The backbone is selected automatically based on ``--transformer-mode``:
+
+**Dimension flow:**
 
 | Backbone | Embed source | Text encoder ``output_dim`` | Concatenation | Hidden dim | Output dim |
 |----------|-------------|----------------------------|---------------|------------|------------|
@@ -260,15 +287,14 @@ automatically based on ``--transformer-mode``:
 | Transformer | Frozen | ``transformer_embed_dim`` (144) | stacked as 2 tokens ← ``g_token(144), text_repr(144)`` | 144 | 64 |
 | Transformer | Trainable | ``transformer_embed_dim`` (144) | stacked as 2 tokens ← ``g_token(144), text_repr(144)`` | 144 | 64 |
 
-**Frozen path** (``--text-encoder true --trainable-embedding false``):
+**Frozen path** (``--text-encoder true``):
 The BERT model outputs 384-dim embeddings which are projected to
 ``output_dim`` (matching the backbone width) via a learned ``nn.Dense``.
 This avoids a 384→64→256 information bottleneck in the MLP case.
 
 **Trainable path** (``--trainable-embedding true``):
 An ``nn.Embed`` lookup table produces vectors of size ``output_dim``
-directly — no intermediate 384-dim representation. The dimension matches
-the backbone width so both paths are comparable.
+directly — no intermediate 384-dim representation.
 
 **MLP backbone** (default or ``--transformer-mode none``):
 Raw coords ``(x, y)`` are first projected to 64 dims (``g_proj``) so they
@@ -289,11 +315,22 @@ Pooling is controlled by ``--text-pooling``:
 - **``token``**: all BERT token vectors kept — ``1 + seq_len`` tokens in
   the transformer backbone. The MLP backbone mean-pools to a single vector.
 
-The text embedding source is controlled by ``--trainable-embedding``:
+### Examples
 
-    # Raw coords + frozen MiniLM → MLP backbone
-    --text-encoder true --hybrid-goal-encoder true
+```bash
+# Frozen MiniLM text encoder (no hybrid)
+--text-encoder true
 
-    # Raw coords + trainable embedding → semantic transformer
-    --text-encoder true --hybrid-goal-encoder true \
-        --trainable-embedding true --transformer-mode StateGoal
+# Trainable embedding lookup (no hybrid)
+--trainable-embedding true
+
+# Frozen MiniLM + raw coordinates via MLP backbone
+--text-encoder true --hybrid-goal-encoder true
+
+# Trainable embedding + raw coordinates via semantic transformer
+--trainable-embedding true --hybrid-goal-encoder true \
+    --transformer-mode StateGoal
+
+# Error: both text_encoder and trainable_embedding set
+--text-encoder true --trainable-embedding true   # raises ValueError
+```

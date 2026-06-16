@@ -7,31 +7,57 @@ from modules.frozen_text_encoder import FrozenTextGoalEncoder, PrecomputedFrozen
 
 class SemanticTransformerGEncoderText(nn.Module):
     """
-    Goal encoder using frozen Sentence-BERT text encoding.
+    Goal encoder using either frozen text or trainable embeddings.
 
-    Converts the 2-dim goal (x, y) into the prompt
-    "Your goal is (x,y)" and encodes it with a pretrained SBERT model.
+    ``embed_source="frozen"`` (default):
+        Converts the 2-dim goal into a text prompt
+        ``"Your goal is (x,y)"`` and encodes it via
+        ``PrecomputedFrozenTextGoalEncoder`` when *possible_goals* is set,
+        falling back to the slower ``FrozenTextGoalEncoder`` otherwise.
 
-    When ``possible_goals`` is provided, precomputes embeddings for all
-    possible positions at init time and uses fast nearest-neighbour
-    look-up during training instead of running the SBERT model.
+    ``embed_source="trainable"``:
+        Delegates to ``TrainableEmbeddingGoalEncoder`` (learned lookup
+        table). Requires *possible_goals*.
+
+    Either way the output is ``(B, output_dim)`` — ready for the critic's
+    InfoNCE loss.
 
     Args:
         output_dim: output embedding dimension (default: 64).
-        possible_goals: (N, 2) array of all goal coordinates that may
-            appear during training. If ``None``, the original SBERT
-            forward pass is used (slower but general).
+        possible_goals: (N, 2) array for precomputed look-up.
+            Required when *embed_source* is ``"trainable"``.
+        model_key: text model short name (default: ``"minilm"``).
+        embed_source: ``"frozen"`` (pretrained text) or
+            ``"trainable"`` (learned lookup).
+        description_type: ``"coordinates"``, ``"exact"``, or
+            ``"high_level"`` (default: ``"coordinates"``).
+        pooling: ``"cls"``, ``"mean"``, or ``"token"`` (default:
+            ``"cls"``). Only used when *embed_source* is ``"frozen"``.
     """
     output_dim: int = 64
     possible_goals: jnp.ndarray | None = None
     model_key: str = "minilm"
+    embed_source: str = "frozen"  # "frozen" or "trainable"
+    description_type: str = "coordinates"
+    pooling: str = "cls"
 
     @nn.compact
     def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
+        if self.embed_source == "trainable":
+            if self.possible_goals is None:
+                raise ValueError(
+                    "embed_source='trainable' requires a finite goal set; "
+                    "possible_goals must be provided."
+                )
+            return TrainableEmbeddingGoalEncoder(
+                output_dim=self.output_dim,
+                possible_goals=self.possible_goals,
+            )(g)
         return FrozenTextGoalEncoder(
             output_dim=self.output_dim,
             model_key=self.model_key,
             possible_goals=self.possible_goals,
+            pooling=self.pooling,
             description_type=self.description_type,
         )(g)
 
