@@ -170,6 +170,7 @@ def goal_to_nav_prompt(goal, description_type) -> str:
     Returns:
         A single navigation prompt string for the requested goal.
     """
+    goal = tuple(map(float, goal))
     if description_type == "exact":
         prompts = U4_EXACT_PATH_PROMPTS
     elif description_type == "high_level":
@@ -357,7 +358,7 @@ class FrozenTextGoalEncoder(nn.Module):
             attention_mask = jnp.ones_like(input_ids)
         elif self.description_type == "exact" or self.description_type == "high_level":
             g_np = np.asarray(g)
-            prompts = goal_to_nav_prompt(g_np)
+            prompts = goal_to_nav_prompt(g_np, self.description_type)
             input_ids, attention_mask = tokenize_nav_prompt(prompts, tokenizer)
         else:
             raise ValueError(f"Invalid description_type: {self.description_type}")
