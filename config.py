@@ -72,7 +72,7 @@ class Args:
     use_relu: int = 0
     transformer_mode: Literal["none", "Full", "State", "StateGoal", "StateActor"] = "none"
     description_type: Literal["coordinates", "high_level", "exact"] = "coordinates"
-    text_encoder: bool = True
+    text_encoder: bool = False
     text_model: str = "minilm"  # "minilm", "bge", "gte", or "e5"
     trainable_embedding: bool = False
     hybrid_goal_encoder: bool = False
