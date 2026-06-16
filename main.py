@@ -176,12 +176,14 @@ if __name__ == "__main__":
                 pooling=args.text_pooling,
                 mlp_width=args.critic_network_width,
                 transformer_embed_dim=args.transformer_embed_dim,
+                description_type=args.description_type,
             )
         else:
             g_encoder = SemanticTransformerGEncoderText(
                 output_dim=64,
                 possible_goals=possible_goals,
                 model_key=args.text_model,
+                description_type=args.description_type,
             )
     elif args.trainable_embedding:
         if possible_goals is None:

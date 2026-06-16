@@ -1,9 +1,9 @@
 """
 Text-based goal encoder for 2D ant goals using a frozen pretrained text model.
 
-Converts (x, y) coordinates to the prompt "Your goal is (x,y)"
-and encodes it via a HuggingFace BERT-family model. Supports multiple
-model variants via a registry keyed by short names.
+Converts (x, y) coordinates to a prompt string and encodes it via a
+HuggingFace BERT-family model. Supports multiple model variants via a
+registry keyed by short names.
 
 Two execution paths exist:
 * **Precomputed** (fast) — for environments with a finite set of possible
@@ -131,11 +131,80 @@ def tokenize_goal_prompt(g: jnp.ndarray) -> jnp.ndarray:
     return jnp.concatenate([prefix, x_tok, comma, y_tok, suffix], axis=-1)
 
 
+U4_EXACT_PATH_PROMPTS: dict[tuple[float, float], str] = {
+    (4.0,   4.0): "Go UP",
+    (4.0,   8.0): "Go UP RIGHT",
+    (4.0,  12.0): "Go UP RIGHT RIGHT",
+    (8.0,   4.0): "You are already at the goal",
+    (8.0,  12.0): "Go UP RIGHT RIGHT DOWN",
+    (12.0, 12.0): "Go UP RIGHT RIGHT DOWN DOWN",
+    (16.0,  4.0): "Go UP RIGHT RIGHT DOWN DOWN DOWN DOWN LEFT LEFT UP",
+    (16.0, 12.0): "Go UP RIGHT RIGHT DOWN DOWN DOWN",
+    (20.0,  4.0): "Go UP RIGHT RIGHT DOWN DOWN DOWN DOWN LEFT LEFT",
+    (20.0,  8.0): "Go UP RIGHT RIGHT DOWN DOWN DOWN DOWN LEFT",
+    (20.0, 12.0): "Go UP RIGHT RIGHT DOWN DOWN DOWN DOWN",
+}
+
+U4_HIGH_LEVEL_PROMPTS: dict[tuple[float, float], str] = {
+    (4.0,   4.0): "Go one step up.",
+    (4.0,   8.0): "Go all the way up. Go one step right.",
+    (4.0,  12.0): "Go all the way up. Go two steps right.",
+    (8.0,   4.0): "You are already at the goal.",
+    (8.0,  12.0): "Go all the way up. Go all the way right. Go one step down.",
+    (12.0, 12.0): "Go all the way up. Go all the way right. Go two steps down.",
+    (16.0,  4.0): "Go all the way up. Go all the way right. Go all the way down.  Go all the way left. Go one step up.",
+    (16.0, 12.0):  "Go all the way up. Go all the way right. Go three steps down.",
+    (20.0,  4.0):  "Go all the way up. Go all the way right. Go all the way down.  Go all two steps left.",
+    (20.0,  8.0): "Go all the way up. Go all the way right. Go all the way down.  Go all one step left.",
+    (20.0, 12.0):  "Go all the way up. Go all the way right. Go four steps down.",
+}
+
+def goal_to_nav_prompt(goal, description_type) -> str:
+    """
+    Convert a single goal coordinate into a U4 navigation prompt.
+
+    Args:
+        goal: Tuple or array-like goal coordinate (x, y).
+        description_type: ``"exact"`` or ``"high_level"``.
+
+    Returns:
+        A single navigation prompt string for the requested goal.
+    """
+    if description_type == "exact":
+        prompts = U4_EXACT_PATH_PROMPTS
+    elif description_type == "high_level":
+        prompts = U4_HIGH_LEVEL_PROMPTS
+    else:
+        raise ValueError(f"Invalid description_type: {description_type}")
+
+    if goal in prompts:
+        return prompts[goal]
+    else:
+        raise ValueError(f"Goal coordinate {goal} not found in {prompts}.")
+
+
+def tokenize_nav_prompt(
+    prompt: str,
+    tokenizer: Any,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """
+    Tokenize a single navigation string.
+
+    Returns:
+        input_ids:      (1, seq_len) int32
+        attention_mask: (1, seq_len) int32
+    """
+    enc = tokenizer(prompt, return_tensors="jax", padding=False, truncation=True)
+    return enc["input_ids"].astype(jnp.int32), enc["attention_mask"].astype(jnp.int32)
+
+
 # ── Precomputation helper ────────────────────────────────────────────────
 
 def _precompute_all_goal_embeddings(
-    possible_goals: np.ndarray, model_key: str,
+    possible_goals: np.ndarray,
+    model_key: str,
     pooling: str = "cls",
+    description_type = "coordinates",
 ) -> jnp.ndarray:
     """
     Precompute embeddings for a fixed set of goal coordinates.
@@ -144,16 +213,25 @@ def _precompute_all_goal_embeddings(
         possible_goals: (N, 2) numpy array of goal coordinates.
         model_key: short name in MODEL_REGISTRY.
         pooling: ``"cls"``, ``"mean"``, or ``"token"``.
+        description_type: ``"coordinates"``, ``"exact"``, or ``"high_level"``.
 
     Returns:
         ``(N, embed_dim)`` for cls/mean, ``(N, seq_len, embed_dim)`` for token.
     """
-    _, model, params = _load_model(model_key)
+    tokenizer, model, params = _load_model(model_key)
     all_embs = []
     for coord in possible_goals:
         g = jnp.array([[coord[0], coord[1]]])
-        input_ids = tokenize_goal_prompt(g)
-        attention_mask = jnp.ones_like(input_ids)
+
+        if description_type == "coordinates":
+            input_ids = tokenize_goal_prompt(g)
+            attention_mask = jnp.ones_like(input_ids)
+        elif description_type == "exact" or description_type == "high_level":
+            prompt = goal_to_nav_prompt(coord, description_type)
+            input_ids, attention_mask = tokenize_nav_prompt(prompt, tokenizer)
+        else:
+            raise ValueError(f"Invalid description_type: {description_type}")
+        
         outputs = model(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -166,8 +244,10 @@ def _precompute_all_goal_embeddings(
             masked = outputs.last_hidden_state * attention_mask[:, :, None]
             emb = masked.sum(axis=1) / attention_mask.sum(axis=1, keepdims=True)
             all_embs.append(emb)  # (1, embed_dim)
-        else:
+        elif pooling == "token":
             all_embs.append(outputs.last_hidden_state)  # (1, seq_len, embed_dim)
+        else:
+            raise ValueError(f"Invalid pooling mode: {pooling}")
     return jnp.concatenate(all_embs, axis=0)
 
 
@@ -194,12 +274,16 @@ class PrecomputedFrozenTextGoalEncoder(nn.Module):
     output_dim: int = 64
     model_key: str = "minilm"
     pooling: str = "cls"
+    description_type: str = "coordinates"
 
     def setup(self):
         goals_np = np.asarray(self.possible_goals)
         self._precomputed_goals = jnp.asarray(goals_np)
         self._precomputed_embs = _precompute_all_goal_embeddings(
-            goals_np, self.model_key, pooling=self.pooling,
+            goals_np, 
+            self.model_key,
+            pooling=self.pooling,
+            description_type=self.description_type,
         )
         lecun_uniform = variance_scaling(1 / 3, "fan_in", "uniform")
         self.proj = nn.Dense(
@@ -222,12 +306,12 @@ class PrecomputedFrozenTextGoalEncoder(nn.Module):
 
 class FrozenTextGoalEncoder(nn.Module):
     """
-    Encodes a 2D goal as "Your goal is (x,y)" via a frozen HuggingFace
-    text model, then projects to *output_dim*.
+    Encodes a 2D goal via a frozen HuggingFace text model, then projects
+    to *output_dim*.
 
     When *possible_goals* is provided, the fast precomputed path is used
-    automatically. Otherwise the full frozen model is run each forward
-    pass (slower but general).
+    automatically (``PrecomputedFrozenTextGoalEncoder``). Otherwise the full
+    frozen model is run each forward pass (slower but general).
 
     All pooling modes project to *output_dim*.  ``"token"`` mode returns
     ``(B, seq_len, output_dim)``; cls/mean return ``(B, output_dim)``.
@@ -239,11 +323,15 @@ class FrozenTextGoalEncoder(nn.Module):
             ``None`` (default) the full model is run on every call.
             When set, ``PrecomputedFrozenTextGoalEncoder`` is used.
         pooling: ``"cls"``, ``"mean"``, or ``"token"`` (default: ``"cls"``).
+        description_type: ``"coordinates"`` (default) → ``"Your goal is (x,y)"``;
+            ``"exact"`` or ``"high_level"`` → U4 maze navigation instructions,
+            e.g. ``"Go UP RIGHT"``.
     """
     output_dim: int = 64
     model_key: str = "minilm"
     possible_goals: jnp.ndarray | None = None
     pooling: str = "cls"
+    description_type: str = "coordinates"
 
     @nn.compact
     def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
@@ -253,6 +341,7 @@ class FrozenTextGoalEncoder(nn.Module):
                 possible_goals=self.possible_goals,
                 model_key=self.model_key,
                 pooling=self.pooling,
+                description_type=self.description_type,
             )(g)
 
         logging.warning(
@@ -260,14 +349,18 @@ class FrozenTextGoalEncoder(nn.Module):
             "slow direct path (full BERT inference every forward pass). "
             "Provide possible_goals to use the fast precomputed path."
         )
-
-        # --- Direct (non-precomputed) path ---
-        _, model, _ = _load_model(self.model_key)
+        # --- Original direct path: JAX manual tokenisation ---
+        tokenizer, model, _ = _load_model(self.model_key)
         params = self.param("model_params", lambda _: _load_model(self.model_key)[2])
-
-        input_ids      = tokenize_goal_prompt(g)
-        attention_mask = jnp.ones_like(input_ids)
-
+        if self.description_type == "coordinates":
+            input_ids      = tokenize_goal_prompt(g)
+            attention_mask = jnp.ones_like(input_ids)
+        elif self.description_type == "exact" or self.description_type == "high_level":
+            g_np = np.asarray(g)
+            prompts = goal_to_nav_prompt(g_np)
+            input_ids, attention_mask = tokenize_nav_prompt(prompts, tokenizer)
+        else:
+            raise ValueError(f"Invalid description_type: {self.description_type}")
         outputs = model(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -282,10 +375,11 @@ class FrozenTextGoalEncoder(nn.Module):
             masked = outputs.last_hidden_state * attention_mask[:, :, None]
             emb = masked.sum(axis=1) / attention_mask.sum(axis=1, keepdims=True)
             emb = jax.lax.stop_gradient(emb)
-        else:
+        elif self.pooling == "token":
             # token: (B, seq_len, 384) → project to output_dim
             emb = jax.lax.stop_gradient(outputs.last_hidden_state)
-
+        else:
+            raise ValueError(f"Invalid pooling mode: {self.pooling}")
         x = nn.Dense(
             self.output_dim,
             kernel_init=lecun_uniform,

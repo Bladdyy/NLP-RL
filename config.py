@@ -71,6 +71,7 @@ class Args:
     loss_temperature: float = 0.1
     use_relu: int = 0
     transformer_mode: Literal["none", "Full", "State", "StateGoal", "StateActor"] = "none"
+    description_type: Literal["coordinates", "high_level", "exact"] = "coordinates"
     text_encoder: bool = True
     text_model: str = "minilm"  # "minilm", "bge", "gte", or "e5"
     trainable_embedding: bool = False
