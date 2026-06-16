@@ -8,7 +8,7 @@ class Args:
     torch_deterministic: bool = True
     cuda: bool = True
     track: bool = True
-    wandb_project_name: str = "NLPRL"
+    wandb_project_name: str = "NLP"
     wandb_entity: str = 'oskarkulinski-mimuw'
     wandb_mode: str = 'online'
     wandb_dir: str = '.'
