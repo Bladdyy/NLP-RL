@@ -1,8 +1,14 @@
+import numpy as np
 import flax.linen as nn
 from flax.linen.initializers import variance_scaling
 import jax.numpy as jnp
 from modules.utils import TransformerBackbone
-from modules.frozen_text_encoder import FrozenTextGoalEncoder, PrecomputedFrozenTextGoalEncoder
+from modules.frozen_text_encoder import (
+    FrozenTextGoalEncoder,
+    PrecomputedFrozenTextGoalEncoder,
+    U4_EXACT_PATH_PROMPTS,
+    U4_HIGH_LEVEL_PROMPTS,
+)
 
 
 class SemanticTransformerGEncoderText(nn.Module):
@@ -52,6 +58,7 @@ class SemanticTransformerGEncoderText(nn.Module):
             return TrainableEmbeddingGoalEncoder(
                 output_dim=self.output_dim,
                 possible_goals=self.possible_goals,
+                description_type=self.description_type,
             )(g)
         return FrozenTextGoalEncoder(
             output_dim=self.output_dim,
@@ -62,42 +69,114 @@ class SemanticTransformerGEncoderText(nn.Module):
         )(g)
 
 
+def _prompt_text(goal: tuple[float, float], description_type: str) -> str:
+    """
+    Generate the full prompt string for a goal, matching the format
+    used by the frozen text encoder.
+    """
+    if description_type == "coordinates":
+        x, y = goal
+        return f"Your goal is ({x:.2f},{y:.2f})"
+    if description_type == "exact":
+        return U4_EXACT_PATH_PROMPTS[goal]
+    if description_type == "high_level":
+        return U4_HIGH_LEVEL_PROMPTS[goal]
+    raise ValueError(f"Unknown description_type: {description_type}")
+
+
 class TrainableEmbeddingGoalEncoder(nn.Module):
     """
-    Trainable embedding layer for discrete goal positions.
+    Trainable goal encoder with per-goal attention over prompt words.
 
-    Maps each (x, y) goal to a learned dense vector via a lookup table
-    (``nn.Embed``).  Only applicable when the goal space is finite, i.e.
-    when *possible_goals* is known — typically ant-maze environments.
+    Generates the same prompt string as ``FrozenTextGoalEncoder``,
+    splits it into words, and embeds each word via a shared vocabulary.
+    A per-goal learned query vector then attends over the word
+    embeddings, letting each goal learn which words matter most for its
+    prompt.  The attention-weighted sum replaces mean pooling to avoid
+    gradient dilution from shared words.
 
-    Unlike the frozen-text encoders, the embedding weights **are trained**
-    end-to-end with the critic objective.
+    Structurally analogous to the frozen encoder — prompt → tokenise →
+    embed → pool — but with learned embeddings and learned attention
+    instead of frozen BERT.
+
+    Only applicable when the goal space is finite (``possible_goals``).
 
     Args:
         output_dim: embedding dimension (default: 64).
         possible_goals: (N, 2) array of all goal coordinates that may
             appear during training.
+        description_type: ``"coordinates"``, ``"exact"``, or
+            ``"high_level"`` (default: ``"coordinates"``).  Selects
+            the prompt template used to generate the word sequence.
     """
     possible_goals: jnp.ndarray  # (N, 2)
     output_dim: int = 64
+    description_type: str = "coordinates"
 
     def setup(self):
-        self._precomputed_goals = jnp.asarray(self.possible_goals)
-        n_goals = self.possible_goals.shape[0]
-        self.embed = nn.Embed(
+        goals_np = np.asarray(self.possible_goals)
+        self._precomputed_goals = jnp.asarray(goals_np)
+        n_goals = len(goals_np)
+
+        # Build vocabulary from all prompts for this description_type.
+        word_seqs: list[list[str]] = []
+        words_set: set[str] = set()
+        for coord in goals_np:
+            prompt = _prompt_text(tuple(coord), self.description_type)
+            words = [w.strip(".,!?;:").lower() for w in prompt.split()]
+            words_set.update(words)
+            word_seqs.append(words)
+
+        # index 0 = <pad>, actual words start at 1
+        vocab = sorted(words_set)
+        word_to_idx = {w: i + 1 for i, w in enumerate(vocab)}
+        vocab_size = len(vocab) + 1  # +1 for <pad>
+
+        max_len = max(len(ws) for ws in word_seqs)
+        indices_np = np.zeros((n_goals, max_len), dtype=np.int32)
+        for i, words in enumerate(word_seqs):
+            for j, w in enumerate(words):
+                indices_np[i, j] = word_to_idx[w]
+
+        self._goal_word_indices = jnp.asarray(indices_np)  # (N, seq_len)
+        self.word_embed = nn.Embed(
+            num_embeddings=vocab_size,
+            features=self.output_dim,
+            name="word_embed",
+        )
+        # Per-goal attention query — each goal learns which words in
+        # its prompt are informative and which are filler.
+        self.goal_query = nn.Embed(
             num_embeddings=n_goals,
             features=self.output_dim,
-            name="goal_embed",
+            name="goal_query",
         )
 
     def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
-        # (B, 2) -> nearest goal index -> trainable embedding
+        # (B, 2) -> nearest goal index
         dists = jnp.linalg.norm(
             g[:, None, :] - self._precomputed_goals[None, :, :],
             axis=-1,
         )  # (B, N)
-        indices = jnp.argmin(dists, axis=-1)  # (B,)
-        return self.embed(indices)  # (B, output_dim)
+        nearest = jnp.argmin(dists, axis=-1)  # (B,)
+
+        # (B, seq_len) word indices for this goal
+        word_indices = self._goal_word_indices[nearest]
+        word_embs = self.word_embed(word_indices)  # (B, seq_len, output_dim)
+
+        # (B, output_dim) query vector for this goal
+        query = self.goal_query(nearest)  # (B, output_dim)
+
+        # Attention: each goal's query scores each word in its prompt.
+        # Padding positions (index 0) are masked out before softmax.
+        scores = jnp.einsum("bd,bsd->bs", query, word_embs) / jnp.sqrt(
+            self.output_dim
+        )  # (B, seq_len)
+        mask = (word_indices > 0).astype(jnp.float32)  # (B, seq_len)
+        scores = scores - 1e9 * (1.0 - mask)
+        attn = nn.softmax(scores)  # (B, seq_len)
+
+        return jnp.einsum("bs,bsd->bd", attn, word_embs)  # (B, output_dim)
 
 
 class HybridGoalEncoder(nn.Module):
@@ -160,6 +239,7 @@ class HybridGoalEncoder(nn.Module):
                 text_repr = TrainableEmbeddingGoalEncoder(
                     output_dim=self.mlp_width,
                     possible_goals=self.possible_goals,
+                    description_type=self.description_type,
                 )(g)
             else:
                 # Frozen encoder has 384-dim BERT → project to mlp_width
@@ -188,6 +268,7 @@ class HybridGoalEncoder(nn.Module):
             text_repr = TrainableEmbeddingGoalEncoder(
                 possible_goals=self.possible_goals,
                 output_dim=self.transformer_embed_dim,
+                description_type=self.description_type,
             )(g)
         else:
             text_repr = PrecomputedFrozenTextGoalEncoder(
