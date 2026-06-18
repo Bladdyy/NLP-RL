@@ -10,7 +10,9 @@
 
 export XLA_FLAGS="--xla_gpu_cuda_data_dir=/home/ok479034/NLP-RL/.venv/lib/python3.10/site-packages/nvidia/cuda_nvcc ${XLA_FLAGS}"
 export PATH="/home/ok479034/NLP-RL/.venv/lib/python3.10/site-packages/nvidia/cuda_nvcc/bin:$PATH"
+export XLA_PYTHON_CLIENT_AUTOTUNE=false
 
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
 echo "Started"
 
 set -eux
