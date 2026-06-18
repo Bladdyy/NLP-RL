@@ -21,6 +21,10 @@ from modules.utils import scale_transformer_projections
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
+import os
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".70"
+os.environ["XLA_FLAGS"] = "--xla_gpu_autotune_level=0"
 
 def make_transformer_optimizer(learning_rate, weight_decay, max_norm, params, warmup_steps=50_000):
     """Build an optimizer with gradient clipping, linear LR warmup, and AdamW weight decay
