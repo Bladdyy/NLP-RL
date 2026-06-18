@@ -70,7 +70,7 @@ class Args:
     disable_entropy: int = 0
     loss_temperature: float = 0.1
     learnable_temperature: bool = False
-    embed_norm: Literal["base", "l2"] = "base"
+    embed_norm: Literal["base", "l2", "sigreg", "weak_sigreg"] = "base"
     use_relu: int = 0
     transformer_mode: Literal["none", "Full", "State", "StateGoal", "StateActor"] = "none"
     tokenization: str = "patches"  # "patches", "semantic", or "per_dim"
@@ -87,6 +87,18 @@ class Args:
     transformer_lr: float = 3e-4
     transformer_weight_decay: float = 0.0
     num_render: int = 10
+    # SIGReg regularization parameters
+    sigreg_coeff: float = 0.1
+    """Coefficient for SIGReg regularization loss (only used when embed_norm is 'sigreg' or 'weak_sigreg')."""
+    sigreg_num_slices: int = 1024
+    """Number of random 1D projections M for strong SIGReg (only used when embed_norm='sigreg')."""
+    sigreg_num_t_nodes: int = 64
+    """Number of quadrature nodes for ECF integration in strong SIGReg."""
+    sigreg_bandwidth: float = 1.0
+    """Bandwidth parameter for the Gaussian weight in strong SIGReg."""
+    sigreg_sketch_dim: int = 64
+    """Sketch dimension for weak SIGReg covariance sketching (only used when embed_norm='weak_sigreg')."""
+
     save_buffer: int = 0
     
     # to be filled in runtime
