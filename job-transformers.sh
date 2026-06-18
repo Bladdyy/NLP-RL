@@ -41,7 +41,6 @@ uv run main.py \
   --transformer_lr 1e-4 \
   --transformer_weight_decay 1e-4 \
   --embed_norm base \
-  --use_post_norm \
   --entropy_param 0.5 \
   --sigreg_coeff 0.1 \
   --sigreg_bandwidth 1.0 \
