@@ -8,6 +8,9 @@
 #SBATCH --error=logs/slurm-crl-transformer-error.txt
 #SBATCH --time=16:00:00
 
+export XLA_FLAGS="--xla_gpu_cuda_data_dir=/home/ok479034/NLP-RL/.venv/lib/python3.10/site-packages/nvidia/cuda_nvcc ${XLA_FLAGS}"
+export PATH="/home/ok479034/NLP-RL/.venv/lib/python3.10/site-packages/nvidia/cuda_nvcc/bin:$PATH"
+
 echo "Started"
 
 set -eux
