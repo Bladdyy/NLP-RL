@@ -46,6 +46,7 @@ class SemanticTransformerGEncoderText(nn.Module):
     embed_source: str = "frozen"  # "frozen" or "trainable"
     description_type: str = "coordinates"
     pooling: str = "cls"
+    precomputed_embs: jnp.ndarray | None = None
 
     @nn.compact
     def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
@@ -66,6 +67,7 @@ class SemanticTransformerGEncoderText(nn.Module):
             possible_goals=self.possible_goals,
             pooling=self.pooling,
             description_type=self.description_type,
+            precomputed_embs=self.precomputed_embs,
         )(g)
 
 
@@ -221,6 +223,7 @@ class HybridGoalEncoder(nn.Module):
     mlp_width: int = 256
     transformer_embed_dim: int = 144
     description_type: str = "coordinates"
+    precomputed_embs: jnp.ndarray | None = None
 
     @nn.compact
     def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
@@ -250,6 +253,7 @@ class HybridGoalEncoder(nn.Module):
                     model_key=self.model_key,
                     pooling=self.pooling,
                     description_type=self.description_type,
+                    precomputed_embs=self.precomputed_embs,
                 )(g)
             # MLP needs a fixed-size vector → pool to single if 3D.
             if text_repr.ndim == 3:
@@ -277,6 +281,7 @@ class HybridGoalEncoder(nn.Module):
                 model_key=self.model_key,
                 pooling=self.pooling,
                 description_type=self.description_type,
+                precomputed_embs=self.precomputed_embs,
             )(g)
 
         g_token = nn.Dense(

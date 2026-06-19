@@ -18,6 +18,7 @@ from envs.env_functions import make_env
 from modules.actor import Actor, TransformerActor, SemanticTransformerActor, PerDimTransformerActor, generate_step_functions
 from modules.critic import SA_encoder, G_encoder, TransformerSAEncoder, TransformerGEncoder, SemanticTransformerSAEncoder, SemanticTransformerGEncoder, PerDimTransformerSAEncoder, PerDimTransformerGEncoder
 from modules.goal_encoders import SemanticTransformerGEncoderText, HybridGoalEncoder
+from modules.frozen_text_encoder import precompute_all_goal_embeddings
 from utils import TrainingState, Transition, save_params, jit_wrap, setup_project, save_results
 from train import create_training_functions
 
@@ -126,6 +127,20 @@ if __name__ == "__main__":
     eval_env_state = jax.jit(eval_env.reset)(eval_env_keys)
     eval_env.step = jax.jit(eval_env.step)
 
+    # ── Precompute text embeddings once (avoids re-running the frozen BERT model
+    #     inside PrecomputedFrozenTextGoalEncoder.setup() every Flax re-trace) ──
+    precomputed_goal_embs: jnp.ndarray | None = None
+    if args.text_encoder and possible_goals is not None:
+        print(f"Precomputing text embeddings for {len(possible_goals)} goals using {args.text_model}...", flush=True)
+        t0 = time.time()
+        precomputed_goal_embs = precompute_all_goal_embeddings(
+            np.asarray(possible_goals),
+            model_key=args.text_model,
+            pooling=args.text_pooling,
+            description_type=args.description_type,
+        )
+        print(f"Precomputed {precomputed_goal_embs.shape} embeddings in {time.time() - t0:.1f}s", flush=True)
+
 
     # Actor and critic setup ----------------------------------------------------------------------------------------------------------------------------------
 
@@ -186,6 +201,7 @@ if __name__ == "__main__":
             mlp_width=args.critic_network_width,
             transformer_embed_dim=args.transformer_embed_dim,
             description_type=args.description_type,
+            precomputed_embs=precomputed_goal_embs,
         )
     elif args.text_encoder or args.trainable_embedding:
         embed_source = "frozen" if args.text_encoder else "trainable"
@@ -196,6 +212,7 @@ if __name__ == "__main__":
             embed_source=embed_source,
             description_type=args.description_type,
             pooling=args.text_pooling,
+            precomputed_embs=precomputed_goal_embs,
         )
     elif g_is_transformer:
         g_encoder = _make_transformer("g_encoder")

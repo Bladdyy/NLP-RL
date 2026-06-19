@@ -201,7 +201,7 @@ def tokenize_nav_prompt(
 
 # ── Precomputation helper ────────────────────────────────────────────────
 
-def _precompute_all_goal_embeddings(
+def precompute_all_goal_embeddings(
     possible_goals: np.ndarray,
     model_key: str,
     pooling: str = "cls",
@@ -209,6 +209,10 @@ def _precompute_all_goal_embeddings(
 ) -> jnp.ndarray:
     """
     Precompute embeddings for a fixed set of goal coordinates.
+
+    Call this **once** in the training script and pass the result to
+    ``PrecomputedFrozenTextGoalEncoder`` via the *precomputed_embs*
+    field so the frozen text model is never re-run inside ``setup()``.
 
     Args:
         possible_goals: (N, 2) numpy array of goal coordinates.
@@ -252,6 +256,11 @@ def _precompute_all_goal_embeddings(
     return jnp.concatenate(all_embs, axis=0)
 
 
+# Keep a private alias for internal use
+_precompute_all_goal_embeddings = precompute_all_goal_embeddings
+
+
+
 # ── Encoder classes ──────────────────────────────────────────────────────
 
 class PrecomputedFrozenTextGoalEncoder(nn.Module):
@@ -265,27 +274,40 @@ class PrecomputedFrozenTextGoalEncoder(nn.Module):
     All pooling modes project to *output_dim* so the caller always receives
     ``(B, output_dim)`` (cls/mean) or ``(B, seq_len, output_dim)`` (token).
 
+    To avoid re-running the frozen text model on every module re-init (e.g.
+    during JIT re-traces), the caller should precompute embeddings via
+    ``precompute_all_goal_embeddings`` and pass them through *precomputed_embs*.
+    When *precomputed_embs* is ``None``, the encoder falls back to computing
+    them in ``setup()`` (slower, may run more than once).
+
     Args:
         output_dim: projection output dimension (default: 64).
         possible_goals: (N, 2) array of all goal coordinates that may appear.
         model_key: short name in MODEL_REGISTRY (default: ``"minilm"``).
         pooling: ``"cls"``, ``"mean"``, or ``"token"`` (default: ``"cls"``).
+        precomputed_embs: Precomputed embeddings ``(N, embed_dim)`` or
+            ``(N, seq_len, embed_dim)``. When provided, ``setup()`` skips
+            the frozen model forward pass.
     """
     possible_goals: jnp.ndarray  # (N, 2)
     output_dim: int = 64
     model_key: str = "minilm"
     pooling: str = "cls"
     description_type: str = "coordinates"
+    precomputed_embs: jnp.ndarray | None = None
 
     def setup(self):
         goals_np = np.asarray(self.possible_goals)
         self._precomputed_goals = jnp.asarray(goals_np)
-        self._precomputed_embs = _precompute_all_goal_embeddings(
-            goals_np, 
-            self.model_key,
-            pooling=self.pooling,
-            description_type=self.description_type,
-        )
+        if self.precomputed_embs is None:
+            self._precomputed_embs = _precompute_all_goal_embeddings(
+                goals_np, 
+                self.model_key,
+                pooling=self.pooling,
+                description_type=self.description_type,
+            )
+        else:
+            self._precomputed_embs = self.precomputed_embs
         lecun_uniform = variance_scaling(1 / 3, "fan_in", "uniform")
         self.proj = nn.Dense(
             self.output_dim,
@@ -333,6 +355,7 @@ class FrozenTextGoalEncoder(nn.Module):
     possible_goals: jnp.ndarray | None = None
     pooling: str = "cls"
     description_type: str = "coordinates"
+    precomputed_embs: jnp.ndarray | None = None
 
     @nn.compact
     def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
@@ -343,6 +366,7 @@ class FrozenTextGoalEncoder(nn.Module):
                 model_key=self.model_key,
                 pooling=self.pooling,
                 description_type=self.description_type,
+                precomputed_embs=self.precomputed_embs,
             )(g)
 
         logging.warning(
