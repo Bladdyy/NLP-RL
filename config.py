@@ -76,6 +76,7 @@ class Args:
     text_model: str = "minilm"  # "minilm", "bge", "gte", or "e5"
     trainable_embedding: bool = False
     hybrid_goal_encoder: bool = False
+    negative_mode: Literal["standard", "cross"] = "standard"
     text_pooling: str = "cls"  # "cls", "mean", or "token"
     tokenization: str = "patches"  # "patches", "semantic", or "per_dim"
     # Transformer-specific config (only used when transformer_mode != "none")

@@ -85,6 +85,11 @@ if __name__ == "__main__":
     print("Starting training script...", flush=True)
     
     args = tyro.cli(Args)
+    if args.negative_mode != "standard" and not args.hybrid_goal_encoder:
+        raise ValueError(
+            f"negative_mode='{args.negative_mode}' requires hybrid_goal_encoder=True; "
+            f"got hybrid_goal_encoder={args.hybrid_goal_encoder}"
+        )
     save_path, trigger_sync, (key, buffer_key, env_key, eval_env_key, actor_key, sa_key, g_key) = setup_project(args)
 
     # Training environment setup ------------------------------------------------------------------------------------------------------------------------------

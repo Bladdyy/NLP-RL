@@ -1,3 +1,4 @@
+import jax
 import numpy as np
 import flax.linen as nn
 from flax.linen.initializers import variance_scaling
@@ -226,7 +227,27 @@ class HybridGoalEncoder(nn.Module):
     precomputed_embs: jnp.ndarray | None = None
 
     @nn.compact
-    def __call__(self, g: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, g: jnp.ndarray, pairwise: bool = False) -> jnp.ndarray:
+        """
+        Encode goals into embeddings.
+
+        Args:
+            g: (B, 2) goal coordinates.
+            pairwise: When True, return a ``(B, 1 + 2 * offset, output_dim)``
+                tensor where ``offset = (B - 1) // 3`` and the three blocks
+                along axis=1 are::
+
+                    [0]            : (raw=goal[i], text=goal[i])   — diagonal
+                    [1:1+offset]   : (raw=goal[i], text=goal[j])   — cross1
+                    [1+offset:]    : (raw=goal[j], text=goal[i])   — cross2
+
+                Used to construct cross-modal negatives for the InfoNCE loss
+                without computing all B² raw×text combinations.
+
+        Returns:
+            ``(B, output_dim)`` when ``pairwise=False``, or
+            ``(B, 1 + 2 * offset, output_dim)`` when ``pairwise=True``.
+        """
         lecun = variance_scaling(1 / 3, "fan_in", "uniform")
         bias = nn.initializers.zeros
 
@@ -236,31 +257,68 @@ class HybridGoalEncoder(nn.Module):
                 "possible_goals must be provided."
             )
 
+        # ── Compute shared components ─────────────────────────────────────
+        if self.backbone == "mlp":
+            text_output_dim = self.mlp_width
+        else:
+            text_output_dim = self.transformer_embed_dim
+
+        if self.embed_source == "trainable":
+            text_repr = TrainableEmbeddingGoalEncoder(
+                output_dim=text_output_dim,
+                possible_goals=self.possible_goals,
+                description_type=self.description_type,
+            )(g)
+        else:
+            text_repr = PrecomputedFrozenTextGoalEncoder(
+                possible_goals=self.possible_goals,
+                output_dim=text_output_dim,
+                model_key=self.model_key,
+                pooling=self.pooling,
+                description_type=self.description_type,
+                precomputed_embs=self.precomputed_embs,
+            )(g)
+
         # ── MLP backbone ────────────────────────────────────────────────
         if self.backbone == "mlp":
-            if self.embed_source == "trainable":
-                text_repr = TrainableEmbeddingGoalEncoder(
-                    output_dim=self.mlp_width,
-                    possible_goals=self.possible_goals,
-                    description_type=self.description_type,
-                )(g)
-            else:
-                # Frozen encoder has 384-dim BERT → project to mlp_width
-                # to avoid a 384→64→256 information bottleneck.
-                text_repr = PrecomputedFrozenTextGoalEncoder(
-                    possible_goals=self.possible_goals,
-                    output_dim=self.mlp_width,
-                    model_key=self.model_key,
-                    pooling=self.pooling,
-                    description_type=self.description_type,
-                    precomputed_embs=self.precomputed_embs,
-                )(g)
             # MLP needs a fixed-size vector → pool to single if 3D.
             if text_repr.ndim == 3:
                 text_repr = text_repr.mean(axis=1)
             # Project raw coords up so they don't get drowned by the
             # high-dim text representation.
             g_proj = nn.Dense(64, kernel_init=lecun, bias_init=bias, name="g_proj_mlp")(g)  # 2→64
+
+            if pairwise:
+                B = g.shape[0]
+                offset = (B - 1) // 3
+
+                # Indices for the `offset` items *after* i (mod B)
+                row_idx = jnp.arange(B)[:, None]                            # (B, 1)
+                col_idx = (row_idx + 1 + jnp.arange(offset)[None, :]) % B  # (B, offset)
+
+                # (A) Diagonal: (raw=i, text=i)
+                diag_x = jnp.concatenate([g_proj, text_repr], axis=-1)[:, None, :]  # (B, 1, 64+D)
+
+                # (B) Cross1: (raw=i, text=j)  for j in col_idx[i]
+                g_proj_bc = jnp.broadcast_to(g_proj[:, None, :], (B, offset, 64))
+                text_c1 = text_repr[col_idx]                                       # (B, offset, D)
+                x1 = jnp.concatenate([g_proj_bc, text_c1], axis=-1)                # (B, offset, 64+D)
+
+                # (C) Cross2: (raw=j, text=i)  for j in col_idx[i]
+                g_proj_c2 = g_proj[col_idx]                                        # (B, offset, 64)
+                text_bc = jnp.broadcast_to(
+                    text_repr[:, None, :], (B, offset, text_repr.shape[-1])
+                )
+                x2 = jnp.concatenate([g_proj_c2, text_bc], axis=-1)                # (B, offset, 64+D)
+
+                # Combine → (B, 1 + 2*offset, 64+D) → (B*(1+2*offset), 64+D)
+                x = jnp.concatenate([diag_x, x1, x2], axis=1)
+                x = x.reshape(B * (1 + 2 * offset), -1)
+                x = nn.Dense(self.mlp_width, kernel_init=lecun, bias_init=bias)(x)
+                x = nn.swish(x)
+                x = nn.Dense(self.output_dim, kernel_init=lecun, bias_init=bias)(x)
+                return x.reshape(B, 1 + 2 * offset, self.output_dim)
+
             x = jnp.concatenate([g_proj, text_repr], axis=-1)
             x = nn.Dense(self.mlp_width, kernel_init=lecun, bias_init=bias)(x)
             x = nn.swish(x)
@@ -268,33 +326,60 @@ class HybridGoalEncoder(nn.Module):
             return x
 
         # ── Semantic transformer backbone ───────────────────────────────
-        if self.embed_source == "trainable":
-            text_repr = TrainableEmbeddingGoalEncoder(
-                possible_goals=self.possible_goals,
-                output_dim=self.transformer_embed_dim,
-                description_type=self.description_type,
-            )(g)
-        else:
-            text_repr = PrecomputedFrozenTextGoalEncoder(
-                possible_goals=self.possible_goals,
-                output_dim=self.transformer_embed_dim,
-                model_key=self.model_key,
-                pooling=self.pooling,
-                description_type=self.description_type,
-                precomputed_embs=self.precomputed_embs,
-            )(g)
-
         g_token = nn.Dense(
             self.transformer_embed_dim, kernel_init=lecun, bias_init=bias, name="g_proj",
         )(g)  # (B, embed_dim)
 
+        if pairwise:
+            B = g.shape[0]
+            offset = (B - 1) // 3
+
+            # Pool token-mode to a single vector, same as MLP backbone does.
+            if text_repr.ndim == 3:
+                text_repr = text_repr.mean(axis=1)
+
+            # Indices for the `offset` items *after* i (mod B)
+            row_idx = jnp.arange(B)[:, None]
+            col_idx = (row_idx + 1 + jnp.arange(offset)[None, :]) % B
+
+            # (A) Diagonal: (raw=i, text=i)  →  (B, 2, D)
+            diag_tokens = jnp.stack([g_token, text_repr], axis=1)[:, None, :, :]  # (B, 1, 2, D)
+
+            # (B) Cross1: (raw=i, text=j) for j in col_idx[i]
+            raw_tok_bc = jnp.broadcast_to(
+                g_token[:, None, None, :], (B, offset, 1, self.transformer_embed_dim)
+            )
+            text_c1 = text_repr[col_idx][:, :, None, :]  # (B, offset, 1, D)
+            tokens_c1 = jnp.concatenate([raw_tok_bc, text_c1], axis=2)  # (B, offset, 2, D)
+
+            # (C) Cross2: (raw=j, text=i) for j in col_idx[i]
+            raw_c2 = g_token[col_idx][:, :, None, :]  # (B, offset, 1, D)
+            text_tok_bc = jnp.broadcast_to(
+                text_repr[:, None, None, :], (B, offset, 1, self.transformer_embed_dim)
+            )
+            tokens_c2 = jnp.concatenate([raw_c2, text_tok_bc], axis=2)  # (B, offset, 2, D)
+
+            # Combine → (B, 1 + 2*offset, 2, D) → (B*(1+2*offset), 2, D)
+            all_tokens = jnp.concatenate([diag_tokens, tokens_c1, tokens_c2], axis=1)
+            all_tokens = all_tokens.reshape(B * (1 + 2 * offset), 2, self.transformer_embed_dim)
+            x = TransformerBackbone(
+                embed_dim=self.transformer_embed_dim,
+                num_layers=4,
+                num_heads=4,
+                mlp_ratio=4,
+                num_patches=0,
+                dropout_rate=0.0,
+                pooling="cls",
+            )(all_tokens)
+            x = nn.Dense(self.output_dim, kernel_init=lecun, bias_init=bias)(x)
+            return x.reshape(B, 1 + 2 * offset, self.output_dim)
+
+        # ── Standard (non-pairwise) semantic backbone ─────────────────────
         if text_repr.ndim == 3:
-            # Token mode: (B, seq_len, embed_dim) — concatenate
             tokens = jnp.concatenate(
                 [g_token[:, None, :], text_repr], axis=1,
             )  # (B, 1 + seq_len, embed_dim)
         else:
-            # Single vector (B, embed_dim) — use directly as a token
             tokens = jnp.stack([g_token, text_repr], axis=1)  # (B, 2, embed_dim)
 
         x = TransformerBackbone(

@@ -10,7 +10,12 @@ They need actor, sa_encoder, g_encoder, args and target_entropy upfront as argum
 since these are used in the loss functions and are not expected to change during training.
 """
 def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
-    
+    if args.negative_mode != "standard" and not args.hybrid_goal_encoder:
+        raise ValueError(
+            f"negative_mode='{args.negative_mode}' requires hybrid_goal_encoder=True; "
+            f"got hybrid_goal_encoder={args.hybrid_goal_encoder}"
+        )
+
     def actor_loss(actor_params, critic_params, log_alpha, transitions, key):
         obs = transitions.observation           # expected_shape = batch_size, obs_size + goal_size
         state = obs[:, :args.obs_dim]
@@ -55,35 +60,66 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
 
     def critic_loss(critic_params, transitions, key):
         sa_encoder_params, g_encoder_params = critic_params["sa_encoder"], critic_params["g_encoder"]
-        
+
         obs = transitions.observation[:, :args.obs_dim]
         action = transitions.action
-        
+        goals = transitions.observation[:, args.obs_dim:]
+
         sa_repr = sa_encoder.apply(sa_encoder_params, obs, action)
-        g_repr = g_encoder.apply(g_encoder_params, transitions.observation[:, args.obs_dim:])
-            
-        #sa_repr_norm = sa_repr / (jnp.linalg.norm(sa_repr, axis=-1, keepdims=True) + 1e-6)
-        #g_repr_norm = g_repr / (jnp.linalg.norm(g_repr, axis=-1, keepdims=True) + 1e-6)
 
-        #distances = jnp.sqrt(jnp.sum((sa_repr_norm[:, None, :] - g_repr_norm[None, :, :]) ** 2, axis=-1))
+        if args.hybrid_goal_encoder and args.negative_mode == "cross":
+            # Compute only the needed (raw, text) pairs: diagonal + cross1 + cross2.
+            # Returns (B, 1 + 2*offset, D) — see HybridGoalEncoder.__call__ docstring.
+            g_repr_pairs = g_encoder.apply(g_encoder_params, goals, pairwise=True)
 
-        #logits = -distances / args.loss_temperature
-        
-        logits = -jnp.sqrt(jnp.sum((sa_repr[:, None, :] - g_repr[None, :, :]) ** 2, axis=-1))
+            B = goals.shape[0]
+            offset = (B - 1) // 3
 
-        # InfoNCE
-        critic_loss = -jnp.mean(jnp.diag(logits) - jax.nn.logsumexp(logits, axis=1))
+            # Indices for the `offset` items *after* i (mod B)
+            row_idx = jnp.arange(B)[:, None]      # (B, 1)
+            col_idx = (row_idx + 1 + jnp.arange(offset)[None, :]) % B  # (B, offset)
 
-        # logsumexp regularisation
-        logsumexp = jax.nn.logsumexp(logits + 1e-6, axis=1)
-        critic_loss += args.logsumexp_penalty_coeff * jnp.mean(logsumexp**2)
+            diag = g_repr_pairs[:, 0]                      # (B, D)  — (raw=i, text=i)
+            pos_g = diag[:, None, :]                       # (B, 1, D)
 
-        B = logits.shape[0]
+            # Standard negatives: (raw=j, text=j) for j ≠ i  — indexed from diagonal
+            std_g = diag[col_idx]                          # (B, offset, D)
+            # Cross1 negatives: (raw=i, text=j) — raw correct, text wrong
+            x1_g = g_repr_pairs[:, 1:1 + offset]            # (B, offset, D)
+            # Cross2 negatives: (raw=j, text=i) — raw wrong, text correct
+            x2_g = g_repr_pairs[:, 1 + offset:]             # (B, offset, D)
+
+            n_neg = 3 * offset  # standard + cross1 + cross2 negatives per row
+            all_g = jnp.concatenate([pos_g, std_g, x1_g, x2_g], axis=1)  # (B, 1 + n_neg, D)
+
+            logits = -jnp.sqrt(jnp.sum((sa_repr[:, None, :] - all_g) ** 2, axis=-1))
+
+            # Positive is at column 0
+            critic_loss = -jnp.mean(logits[:, 0] - jax.nn.logsumexp(logits, axis=1))
+
+            logsumexp = jax.nn.logsumexp(logits + 1e-6, axis=1)
+            critic_loss += args.logsumexp_penalty_coeff * jnp.mean(logsumexp**2)
+
+            correct = jnp.mean(jnp.argmax(logits, axis=1) == 0)
+            logits_pos = jnp.mean(logits[:, 0])
+            logits_neg = (jnp.sum(logits) - jnp.sum(logits[:, 0])) / (B * n_neg)
+
+        else:
+            # ── Standard InfoNCE ──────────────────────────────────────────────
+            g_repr = g_encoder.apply(g_encoder_params, goals)
+            logits = -jnp.sqrt(jnp.sum((sa_repr[:, None, :] - g_repr[None, :, :]) ** 2, axis=-1))
+
+            critic_loss = -jnp.mean(jnp.diag(logits) - jax.nn.logsumexp(logits, axis=1))
+
+            logsumexp = jax.nn.logsumexp(logits + 1e-6, axis=1)
+            critic_loss += args.logsumexp_penalty_coeff * jnp.mean(logsumexp**2)
+
+            B = logits.shape[0]
+            correct = jnp.mean(jnp.argmax(logits, axis=1) == jnp.arange(B))
+            logits_pos = jnp.mean(jnp.diag(logits))
+            logits_neg = (jnp.sum(logits) - jnp.sum(jnp.diag(logits))) / (B * (B - 1))
+
         I = jnp.zeros(1)
-        correct = jnp.mean(jnp.argmax(logits, axis=1) == jnp.arange(B))
-        logits_pos = jnp.mean(jnp.diag(logits))
-        logits_neg = (jnp.sum(logits) - jnp.sum(jnp.diag(logits))) / (B * (B - 1))
-
         sa_embedding_norm = jnp.sqrt(jnp.sum(sa_repr ** 2, axis=-1)).mean()
 
         return critic_loss, (logsumexp, I, correct, logits_pos, logits_neg, sa_embedding_norm)
