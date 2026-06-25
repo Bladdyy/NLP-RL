@@ -225,6 +225,38 @@ def precompute_all_goal_embeddings(
     """
     tokenizer, model, params = _load_model(model_key)
     all_embs = []
+
+    if pooling == "token" and description_type in ("exact", "high_level"):
+        # Prompts have variable lengths → pad inputs to the max length
+        # *before* running the model so that all outputs have a uniform
+        # sequence dimension. This avoids padding artifacts in the
+        # projected embeddings.
+        tokenized = []
+        for coord in possible_goals:
+            prompt = goal_to_nav_prompt(coord, description_type)
+            input_ids, attention_mask = tokenize_nav_prompt(prompt, tokenizer)
+            tokenized.append((input_ids, attention_mask))
+
+        max_len = max(t.shape[1] for t, _ in tokenized)
+        pad_token_id = int(tokenizer.pad_token_id or 0)
+
+        for input_ids, attention_mask in tokenized:
+            seq_len = input_ids.shape[1]
+            if seq_len < max_len:
+                pad_width = [(0, 0), (0, max_len - seq_len)]
+                input_ids = jnp.pad(input_ids, pad_width,
+                                    mode="constant", constant_values=pad_token_id)
+                attention_mask = jnp.pad(attention_mask, pad_width,
+                                         mode="constant", constant_values=0)
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                params=params,
+                train=False,
+            )
+            all_embs.append(outputs.last_hidden_state)  # (1, max_len, embed_dim)
+        return jnp.concatenate(all_embs, axis=0)
+
     for coord in possible_goals:
         g = jnp.array([[coord[0], coord[1]]])
 
