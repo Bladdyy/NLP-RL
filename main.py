@@ -207,6 +207,7 @@ if __name__ == "__main__":
             transformer_embed_dim=args.transformer_embed_dim,
             description_type=args.description_type,
             precomputed_embs=precomputed_goal_embs,
+            cross_neg_count=args.cross_negative_count,
         )
     elif args.text_encoder or args.trainable_embedding:
         embed_source = "frozen" if args.text_encoder else "trainable"

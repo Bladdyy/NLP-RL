@@ -1,34 +1,28 @@
 """
 Download data from W&B and create publication-quality plots.
 
-1. MLP vs Transformer (State mode) at depths 8/16/32 on ant_u4_maze.
-2. Transformer configuration comparison (None, State, StateGoal, StateActor, Full)
-   at depth 8 with identical hyperparameters.
-3. Tokenization comparison (patches, semantic, per-dim) - Full transformer at d=8.
-4. Pooling comparison (cls, mean, flatten) - semantic tokenization, Full at d=8.
-5. Pre-LN vs Post-LN comparison - State mode, semantic, flatten at d=8.
-6. Embedding normalization comparison (Base, L2+learnable T, SIGReg, Weak SIGReg)
-   - State mode, semantic, cls at d=8.
-7. Appendix: actor loss, critic loss, and success rate for early transformer runs,
-   showing the training instability that motivated stabilization efforts.
-8. Appendix: temperature parameter and time at goal for the failed L2+learnable T run,
-   illustrating why training collapsed.
-9. Deep comparison: time at goal for the crashed 64-State run vs 32-State-2 and 32-MLP.
+1. Comparison of pretrained encoders vs trainable encoder
+   (MLP 8 x exact cls hybrid, x = minilm, bge, e5, gte, trainable).
+2. Comparison of description_type (MLP 8 BGE cls hybrid, differing only
+   in description_type: exact / coordinates / high_level).
+3. Comparison of text_pooling (TR 8 BGE exact, differing only in
+   text_pooling: cls / mean / token).
+4. Comparison of MLP vs Transformer BASE runs
+   (MLP 8/16/32 BASE vs TR 8/16/32 BASE).  TR 16 BASE is TBD.
+5. Comparison of MLP x BGE exact cls hybrid vs MLP x Base (all 3 sizes).
+6. Comparison of TR x BGE exact cls hybrid vs TR x Base (all 3 sizes).
+   Runs for plots 6 will be added later; the code is left commented out.
 
 Outputs:
-  paper_figures/wandb_mlp_vs_state.pdf (.png)
-  paper_figures/wandb_transformer_modes_compare.pdf (.png)
-  paper_figures/wandb_tokenization_compare.pdf (.png)
-  paper_figures/wandb_pooling_compare.pdf (.png)
-  paper_figures/wandb_norm_compare.pdf (.png)
-  paper_figures/wandb_embed_norm_compare.pdf (.png)
-  paper_figures/wandb_losses_appendix.pdf (.png)
-  paper_figures/wandb_temperature_appendix.pdf (.png)
-  paper_figures/wandb_deep_comparison.pdf (.png)
+  paper_figures/wandb_encoder_compare.pdf
+  paper_figures/wandb_description_type_compare.pdf
+  paper_figures/wandb_pooling_compare.pdf
+  paper_figures/wandb_mlp_vs_transformer.pdf
+  paper_figures/wandb_mlp_bge_vs_base.pdf
+  paper_figures/wandb_tr_bge_vs_base.pdf
 """
 
 import json
-import os
 from pathlib import Path
 
 import numpy as np
@@ -59,115 +53,101 @@ matplotlib.rcParams.update({
 OUT_DIR = Path("paper_figures")
 OUT_DIR.mkdir(exist_ok=True)
 
-# ── Run selection ─────────────────────────────────────────────────────────
-# (entity, project, run_id) for each of the 6 target runs.
-RUNS = {
-    "8-MLP":    {"id": "mlat3yp4",  "label": "MLP d=8",   "arch": "MLP",   "depth": 8},
-    "16-MLP":   {"id": "vc6blv0f",  "label": "MLP d=16",  "arch": "MLP",   "depth": 16},
-    "32-MLP":   {"id": "mkhc4fov",  "label": "MLP d=32",  "arch": "MLP",   "depth": 32},
-    "8-State":  {"id": "5q1mo7o3",  "label": "State d=8",  "arch": "State", "depth": 8},
-    "16-State-2": {"id": "25r8gv9i",  "label": "State d=16", "arch": "State", "depth": 16},
-    "32-State-2": {"id": "i42kndl4",  "label": "State d=32", "arch": "State", "depth": 32},
-}
-
-# Transformer configuration comparison (depth 8, same transformer hyperparams)
-RUNS_TRANSFORMER_MODES = {
-    "None":     {"id": "mlat3yp4",  "label": "None (MLP)",       "mode": "None"},
-    "State":    {"id": "5q1mo7o3",  "label": "State",           "mode": "State"},
-    "StateGoal": {"id": "xto6342e", "label": "StateGoal",      "mode": "StateGoal"},
-    "StateActor": {"id": "31hkna6n", "label": "StateActor",    "mode": "StateActor"},
-    "Full":     {"id": "ecjre8b2",  "label": "Full",           "mode": "Full"},
-}
-
-# Tokenization comparison (Full transformer, depth=8, lr=3e-4, skip=4)
-# Note: per_dim uses flatten pooling while the others use cls
-RUNS_TOKENIZATION = {
-    "patches": {"id": "oh6hlnps",  "label": "Patches",            "tokenization": "patches", "pooling": "cls"},
-    "semantic": {"id": "8hko0hmv", "label": "Semantic",          "tokenization": "semantic", "pooling": "cls"},
-    "per_dim":  {"id": "4xgqytdm", "label": "Per-dim",           "tokenization": "per_dim",  "pooling": "flatten"},
-}
-
-# Pooling comparison (Full transformer, depth=8, semantic tokenization)
-# Note: cls/mean use lr=3e-4, flatten uses lr=1e-4
-RUNS_POOLING = {
-    "cls":     {"id": "8hko0hmv",  "label": "Semantic + CLS",       "tokenization": "semantic", "pooling": "cls"},
-    "mean":    {"id": "tnbnd8n9",  "label": "Semantic + Mean",      "tokenization": "semantic", "pooling": "mean"},
-    "flatten": {"id": "mgb5erec",  "label": "Semantic + Flatten",   "tokenization": "semantic", "pooling": "flatten"},
-}
-
-# Pre-norm vs post-norm comparison (State mode, semantic, flatten, d=8, lr=1e-4)
-RUNS_NORM = {
-    "pre":  {"id": "jc0saw08",  "label": "Pre-LN",   "norm": "pre"},
-    "post": {"id": "0q9rnsrk",  "label": "Post-LN",  "norm": "post"},
-}
-
-# Embedding normalization comparison (State, semantic, cls, d=8, lr=1e-4)
-RUNS_EMBED_NORM = {
-    "base":       {"id": "5q1mo7o3",  "label": "Base",           "embed_norm": "base"},
-    "l2":         {"id": "3i9ngrhw",  "label": "L2 + learnable T", "embed_norm": "l2"},
-    "sigreg":     {"id": "9h2o51br",  "label": "SIGReg",         "embed_norm": "sigreg"},
-    "weak_sigreg": {"id": "uia7633l", "label": "Weak SIGReg",    "embed_norm": "weak_sigreg"},
-}
-
-# Early-run loss analysis (appendix): shows instability in early transformer runs
-RUNS_LOSSES = [
-    {"id": "8hko0hmv", "label": "Semantic + CLS",     "color": "#D55E00"},
-    {"id": "oh6hlnps", "label": "Patches + CLS",      "color": "#0072B2"},
-    {"id": "tnbnd8n9", "label": "Semantic + Mean",    "color": "#009E73"},
-    {"id": "sal1orpj", "label": "State (raw)",        "color": "#CC79A7"},
-]
-
 ENTITY = "oskarkulinski-mimuw"
-PROJECT = "NLPRL"
+PROJECT = "NLP"
 
-# ── Colour / style scheme ────────────────────────────────────────────────
-# We want clear visual grouping: MLP = blues (solid), State = oranges/reds (dashed)
-ARCH_STYLES = {
-    "MLP":   {"color_fn": lambda d: plt.cm.Blues({8: 0.48, 16: 0.72, 32: 0.90}[d]), "ls": "-"},
-    "State": {"color_fn": lambda d: plt.cm.Oranges({8: 0.48, 16: 0.72, 32: 0.90}[d]), "ls": "-"},
+# =====================================================================
+# Run definitions
+# =====================================================================
+
+# ── Plot 1: Pretrained encoders vs trainable encoder ──────────────────
+RUNS_ENCODER = {
+    "minilm":    {"id": "x4s6uus3",  "label": "MINILM"},
+    "bge":       {"id": "48zypgf9",  "label": "BGE"},
+    "e5":        {"id": "wr4rm24g",  "label": "E5"},
+    "gte":       {"id": "50zimqt8",  "label": "GTE"},
+    "trainable": {"id": "c326gyrg",  "label": "Trainable"},
 }
 
-# Distinct colour palette for transformer-mode comparison
-MODE_COLORS = {
-    "None":       "#333333",
-    "State":      "#E69F00",
-    "StateGoal":  "#56B4E9",
-    "StateActor": "#009E73",
-    "Full":       "#CC79A7",
+# ── Plot 2: Description type comparison ───────────────────────────────
+RUNS_DESC_TYPE = {
+    "exact":       {"id": "48zypgf9",  "label": "Exact"},
+    "coordinates": {"id": "udruzpqh",  "label": "Coordinates"},
+    "high_level":  {"id": "76lgjrzy",  "label": "High-level"},
 }
 
-# Colour palette for tokenization comparison
-TOKENIZATION_COLORS = {
-    "patches": "#0072B2",
-    "semantic": "#D55E00",
-    "per_dim":  "#009E73",
+# ── Plot 3: Pooling comparison (text_pooling) ─────────────────────────
+# (Will be filled once the missing runs are available.)
+RUNS_POOLING = {}
+
+# ── Plot 4: MLP vs Transformer BASE runs ──────────────────────────────
+RUNS_MLP_VS_TR = {
+    "MLP 8":  {"id": "f7xnk9yj",  "label": "MLP 8",   "arch": "MLP", "depth": 8},
+    "MLP 16": {"id": "vc6blv0f",  "label": "MLP 16",  "arch": "MLP", "depth": 16},
+    "MLP 32": {"id": "mkhc4fov",  "label": "MLP 32",  "arch": "MLP", "depth": 32},
+    "TR 8":   {"id": "5q1mo7o3",  "label": "TR 8",    "arch": "TR",  "depth": 8},
+    # "TR 16":  {"id": "???",       "label": "TR 16",   "arch": "TR",  "depth": 16},  # TBD
+    "TR 32":  {"id": "i42kndl4",  "label": "TR 32",   "arch": "TR",  "depth": 32},
 }
 
-# Colour palette for pooling comparison
-POOLING_COLORS = {
-    "cls":     "#0072B2",
-    "mean":    "#D55E00",
-    "flatten": "#009E73",
+# ── Plot 5: MLP BGE hybrid vs MLP Base (3 sizes) ──────────────────────
+RUNS_MLP_BGE_VS_BASE = {
+    "MLP 8 BGE exact cls hybrid":  {"id": "48zypgf9",  "label": "MLP 8 BGE"},
+    "MLP 8 BASE":                  {"id": "f7xnk9yj",  "label": "MLP 8 Base"},
+    "MLP 16 BGE exact cls hybrid": {"id": "1nxtxnnf",  "label": "MLP 16 BGE"},
+    "MLP 16 BASE":                 {"id": "vc6blv0f",  "label": "MLP 16 Base"},
+    "MLP 32 BGE exact cls hybrid": {"id": "wgkso04c",  "label": "MLP 32 BGE"},
+    "MLP 32 BASE":                 {"id": "mkhc4fov",  "label": "MLP 32 Base"},
 }
 
-# Colour palette for norm comparison
-NORM_COLORS = {
-    "pre":  "#0072B2",
-    "post": "#D55E00",
+# ── Plot 6: TR BGE hybrid vs TR Base (3 sizes) ────────────────────────
+# (Runs to be added; leave empty for now.)
+RUNS_TR_BGE_VS_BASE = {}
+
+# =====================================================================
+# Colour schemes
+# =====================================================================
+
+# Plot 1: encoder colours
+ENCODER_COLORS = {
+    "minilm":    "#0072B2",
+    "bge":       "#D55E00",
+    "e5":        "#009E73",
+    "gte":       "#CC79A7",
+    "trainable": "#333333",
 }
 
-# Colour palette for embedding normalization comparison
-EMBED_NORM_COLORS = {
-    "base":       "#333333",
-    "l2":         "#0072B2",
-    "sigreg":     "#D55E00",
-    "weak_sigreg": "#009E73",
+# Plot 2: description type colours
+DESC_TYPE_COLORS = {
+    "exact":       "#0072B2",
+    "coordinates": "#D55E00",
+    "high_level":  "#009E73",
+}
+
+# Plot 4: MLP vs TR — blues for MLP, oranges for TR
+ARCH_COLORS = {
+    "MLP": {"color_fn": lambda d: plt.cm.Blues({8: 0.48, 16: 0.72, 32: 0.90}[d]), "ls": "-"},
+    "TR":  {"color_fn": lambda d: plt.cm.Oranges({8: 0.48, 16: 0.72, 32: 0.90}[d]), "ls": "-"},
+}
+
+# Plot 5: MLP BGE vs Base — solid for BGE, dashed for Base
+MLP_BGE_BASE_STYLES = {
+    "MLP 8 BGE":  {"color": "#D55E00", "ls": "-"},
+    "MLP 8 Base": {"color": "#0072B2", "ls": "--"},
+    "MLP 16 BGE": {"color": "#D55E00", "ls": "-"},
+    "MLP 16 Base":{"color": "#0072B2", "ls": "--"},
+    "MLP 32 BGE": {"color": "#D55E00", "ls": "-"},
+    "MLP 32 Base":{"color": "#0072B2", "ls": "--"},
 }
 
 
-def download_all(force=False):
-    """Download eval/episode_success for each run, return dict keyed by run name."""
-    cache_path = OUT_DIR / "_wandb_cache.json"
+# =====================================================================
+# Helpers
+# =====================================================================
+
+def download_runs(runs_dict, cache_name, force=False):
+    """Download eval/episode_success for a dict of runs, cache result."""
+    cache_path = OUT_DIR / f"_wandb_cache_{cache_name}.json"
     if cache_path.exists() and not force:
         print(f"  Using cached data from {cache_path}")
         with open(cache_path) as f:
@@ -175,19 +155,18 @@ def download_all(force=False):
 
     api = wandb.Api()
     data = {}
-    for name, info in RUNS.items():
-        print(f"  Downloading {name} ...", end=" ", flush=True)
+    for key, info in runs_dict.items():
+        print(f"  Downloading {key} ...", end=" ", flush=True)
         run = api.run(f"{ENTITY}/{PROJECT}/{info['id']}")
         hist = run.history(pandas=False)
-        # Filter down to just (epoch, success) pairs
         successes = []
         for h in hist:
-            step = h.get("_step")  # epoch index
+            step = h.get("_step")
             succ = h.get("eval/episode_success")
             if step is not None and succ is not None:
                 successes.append((step, succ))
         successes.sort(key=lambda x: x[0])
-        data[name] = {
+        data[key] = {
             "steps": [s[0] for s in successes],
             "values": [s[1] for s in successes],
         }
@@ -198,46 +177,37 @@ def download_all(force=False):
     return data
 
 
-# ── Plotting ──────────────────────────────────────────────────────────────
+def smooth_series(values, window=3):
+    """Simple moving-average smoothing (centred, edge-padded)."""
+    if window <= 1 or len(values) < window:
+        return np.array(values)
+    kernel = np.ones(window) / window
+    padded = np.pad(values, (window // 2, window // 2), mode="edge")
+    return np.convolve(padded, kernel, mode="valid")[:len(values)]
 
-def make_plot(data, smooth=3):
-    """Plot MLP vs State at depths 8/16/32 - single column width."""
 
-    # ICML single column = 3.25 in, golden ratio height ~ 2.6 in
+def make_plot(data, runs_dict, color_map, linestyle_map, filename, ylabel="Time at goal"):
+    """Generic single-axis line plot."""
     fig, ax = plt.subplots(1, 1, figsize=(6.5, 2.75), constrained_layout=True)
 
-    # Plot each run
-    for name, info in RUNS.items():
-        series = data[name]
-        steps = np.array(series["steps"]) + 1  # 1-indexed epochs
-        values = np.array(series["values"])
+    for key in runs_dict:
+        series = data[key]
+        steps = np.array(series["steps"]) + 1
+        values = smooth_series(np.array(series["values"]))
 
-        # Simple moving-average smoothing (window centred, edge-padded)
-        if smooth > 1:
-            kernel = np.ones(smooth) / smooth
-            values_pad = np.pad(values, (smooth // 2, smooth // 2), mode="edge")
-            values = np.convolve(values_pad, kernel, mode="valid")[:len(values)]
+        color = color_map[key]
+        ls = linestyle_map.get(key, "-")
+        ax.plot(steps, values, color=color, ls=ls, lw=1.2, label=runs_dict[key]["label"])
 
-        style = ARCH_STYLES[info["arch"]]
-        color = style["color_fn"](info["depth"])
-        ls = style["ls"]
-
-        ax.plot(steps, values, color=color, ls=ls, lw=1.2,
-                label=info["label"])
-
-    # Labels and limits
     ax.set_xlabel("Env Steps (M)")
-    ax.set_ylabel("Time at goal")
+    ax.set_ylabel(ylabel)
     ax.set_xlim(0, 105)
     ax.set_ylim(bottom=0)
     ax.grid(True, which="both", axis="y")
-
-    # Legend
     ax.legend(loc="upper left", frameon=True, fancybox=False,
               edgecolor="black", framealpha=0.9, handlelength=2.5)
 
-    save_fig(fig, "wandb_mlp_vs_state")
-    return fig
+    save_fig(fig, filename)
 
 
 def save_fig(fig, name):
@@ -248,584 +218,34 @@ def save_fig(fig, name):
     plt.close(fig)
 
 
-def download_transformer_modes(force=False):
-    """Download eval/episode_success for transformer-mode comparison runs."""
-    cache_path = OUT_DIR / "_wandb_cache_transformer_modes.json"
-    if cache_path.exists() and not force:
-        print(f"  Using cached data from {cache_path}")
-        with open(cache_path) as f:
-            return json.load(f)
+# =====================================================================
+# Plotting functions
+# =====================================================================
 
-    api = wandb.Api()
-    data = {}
-    for name, info in RUNS_TRANSFORMER_MODES.items():
-        print(f"  Downloading {name} ...", end=" ", flush=True)
-        run = api.run(f"{ENTITY}/{PROJECT}/{info['id']}")
-        hist = run.history(pandas=False)
-        successes = []
-        for h in hist:
-            step = h.get("_step")
-            succ = h.get("eval/episode_success")
-            if step is not None and succ is not None:
-                successes.append((step, succ))
-        successes.sort(key=lambda x: x[0])
-        data[name] = {
-            "steps": [s[0] for s in successes],
-            "values": [s[1] for s in successes],
-        }
-        print(f"  {len(successes)} points, final={successes[-1][1]:.1f}")
-
-    with open(cache_path, "w") as f:
-        json.dump(data, f)
-    return data
+def make_encoder_plot(data):
+    """Plot #1: Pretrained encoders vs trainable encoder."""
+    linestyles = {k: "-" for k in RUNS_ENCODER}
+    make_plot(data, RUNS_ENCODER, ENCODER_COLORS, linestyles, "wandb_encoder_compare")
 
 
-def make_transformer_modes_plot(data, smooth=3):
-    """Plot comparing transformer modes (None, State, StateGoal, StateActor, Full)
-    - all at depth 8 with identical transformer hyperparameters."""
+def make_description_type_plot(data):
+    """Plot #2: Description type comparison."""
+    linestyles = {k: "-" for k in RUNS_DESC_TYPE}
+    make_plot(data, RUNS_DESC_TYPE, DESC_TYPE_COLORS, linestyles, "wandb_description_type_compare")
 
+
+def make_mlp_vs_transformer_plot(data):
+    """Plot #4: MLP vs Transformer BASE runs."""
     fig, ax = plt.subplots(1, 1, figsize=(6.5, 2.75), constrained_layout=True)
 
-    # Line styles: dashed for None (MLP baseline), solid for transformer modes
-    linestyles = {
-        "None":       (0, ()),          # solid
-        "State":      (0, (3, 1.5)),    # dotted
-        "StateGoal":  (0, (5, 2)),      # dashed
-        "StateActor": (0, (1, 1)),      # densely dotted
-        "Full":       (0, ()),          # solid
-    }
-
-    for name in RUNS_TRANSFORMER_MODES:
-        series = data[name]
+    for key, info in RUNS_MLP_VS_TR.items():
+        series = data[key]
         steps = np.array(series["steps"]) + 1
-        values = np.array(series["values"])
-
-        if smooth > 1:
-            kernel = np.ones(smooth) / smooth
-            values_pad = np.pad(values, (smooth // 2, smooth // 2), mode="edge")
-            values = np.convolve(values_pad, kernel, mode="valid")[:len(values)]
-
-        ax.plot(steps, values, color=MODE_COLORS[name], ls=linestyles[name], lw=1.2,
-                label=RUNS_TRANSFORMER_MODES[name]["label"])
-
-    ax.set_xlabel("Env Steps (M)")
-    ax.set_ylabel("Time at goal")
-    ax.set_xlim(0, 105)
-    ax.set_ylim(bottom=0)
-    ax.grid(True, which="both", axis="y")
-
-    ax.legend(loc="upper left", frameon=True, fancybox=False,
-              edgecolor="black", framealpha=0.9, handlelength=2.5)
-
-    save_fig(fig, "wandb_transformer_modes_compare")
-    return fig
-
-
-def download_tokenization(force=False):
-    """Download eval/episode_success for tokenization comparison runs."""
-    cache_path = OUT_DIR / "_wandb_cache_tokenization.json"
-    if cache_path.exists() and not force:
-        print(f"  Using cached data from {cache_path}")
-        with open(cache_path) as f:
-            return json.load(f)
-
-    api = wandb.Api()
-    data = {}
-    for name, info in RUNS_TOKENIZATION.items():
-        print(f"  Downloading {name} ...", end=" ", flush=True)
-        run = api.run(f"{ENTITY}/{PROJECT}/{info['id']}")
-        hist = run.history(pandas=False)
-        successes = []
-        for h in hist:
-            step = h.get("_step")
-            succ = h.get("eval/episode_success")
-            if step is not None and succ is not None:
-                successes.append((step, succ))
-        successes.sort(key=lambda x: x[0])
-        data[name] = {
-            "steps": [s[0] for s in successes],
-            "values": [s[1] for s in successes],
-        }
-        print(f"  {len(successes)} points, final={successes[-1][1]:.1f}")
-
-    with open(cache_path, "w") as f:
-        json.dump(data, f)
-    return data
-
-
-def download_pooling(force=False):
-    """Download eval/episode_success for pooling comparison runs."""
-    cache_path = OUT_DIR / "_wandb_cache_pooling.json"
-    if cache_path.exists() and not force:
-        print(f"  Using cached data from {cache_path}")
-        with open(cache_path) as f:
-            return json.load(f)
-
-    api = wandb.Api()
-    data = {}
-    for name, info in RUNS_POOLING.items():
-        print(f"  Downloading {name} ...", end=" ", flush=True)
-        run = api.run(f"{ENTITY}/{PROJECT}/{info['id']}")
-        hist = run.history(pandas=False)
-        successes = []
-        for h in hist:
-            step = h.get("_step")
-            succ = h.get("eval/episode_success")
-            if step is not None and succ is not None:
-                successes.append((step, succ))
-        successes.sort(key=lambda x: x[0])
-        data[name] = {
-            "steps": [s[0] for s in successes],
-            "values": [s[1] for s in successes],
-        }
-        print(f"  {len(successes)} points, final={successes[-1][1]:.1f}")
-
-    with open(cache_path, "w") as f:
-        json.dump(data, f)
-    return data
-
-
-def make_tokenization_plot(data, smooth=3):
-    """Plot comparing tokenization strategies (patches, semantic, per-dim)
-    with the Full transformer at depth 8."""
-
-    fig, ax = plt.subplots(1, 1, figsize=(6.5, 2.75), constrained_layout=True)
-
-    linestyles = {
-        "patches":  (0, ()),
-        "semantic": (0, (4, 1.5)),
-        "per_dim":  (0, (1, 1)),
-    }
-
-    for name in RUNS_TOKENIZATION:
-        series = data[name]
-        steps = np.array(series["steps"]) + 1
-        values = np.array(series["values"])
-
-        if smooth > 1:
-            kernel = np.ones(smooth) / smooth
-            values_pad = np.pad(values, (smooth // 2, smooth // 2), mode="edge")
-            values = np.convolve(values_pad, kernel, mode="valid")[:len(values)]
-
-        ax.plot(steps, values, color=TOKENIZATION_COLORS[name], ls=linestyles[name], lw=1.2,
-                label=RUNS_TOKENIZATION[name]["label"])
-
-    ax.set_xlabel("Env Steps (M)")
-    ax.set_ylabel("Time at goal")
-    ax.set_xlim(0, 105)
-    ax.set_ylim(bottom=0)
-    ax.grid(True, which="both", axis="y")
-
-    ax.legend(loc="upper left", frameon=True, fancybox=False,
-              edgecolor="black", framealpha=0.9, handlelength=2.5)
-
-    save_fig(fig, "wandb_tokenization_compare")
-    return fig
-
-
-def make_pooling_plot(data, smooth=3):
-    """Plot comparing pooling strategies (cls, mean, flatten)
-    with semantic tokenization, Full transformer at depth 8."""
-
-    fig, ax = plt.subplots(1, 1, figsize=(6.5, 2.75), constrained_layout=True)
-
-    linestyles = {
-        "cls":     (0, ()),
-        "mean":    (0, (4, 1.5)),
-        "flatten": (0, (1, 1)),
-    }
-
-    for name in RUNS_POOLING:
-        series = data[name]
-        steps = np.array(series["steps"]) + 1
-        values = np.array(series["values"])
-
-        if smooth > 1:
-            kernel = np.ones(smooth) / smooth
-            values_pad = np.pad(values, (smooth // 2, smooth // 2), mode="edge")
-            values = np.convolve(values_pad, kernel, mode="valid")[:len(values)]
-
-        ax.plot(steps, values, color=POOLING_COLORS[name], ls=linestyles[name], lw=1.2,
-                label=RUNS_POOLING[name]["label"])
-
-    ax.set_xlabel("Env Steps (M)")
-    ax.set_ylabel("Time at goal")
-    ax.set_xlim(0, 105)
-    ax.set_ylim(bottom=0)
-    ax.grid(True, which="both", axis="y")
-
-    ax.legend(loc="upper left", frameon=True, fancybox=False,
-              edgecolor="black", framealpha=0.9, handlelength=2.5)
-
-    save_fig(fig, "wandb_pooling_compare")
-    return fig
-
-
-def download_norm(force=False):
-    """Download eval/episode_success for pre-norm vs post-norm comparison runs."""
-    cache_path = OUT_DIR / "_wandb_cache_norm.json"
-    if cache_path.exists() and not force:
-        print(f"  Using cached data from {cache_path}")
-        with open(cache_path) as f:
-            return json.load(f)
-
-    api = wandb.Api()
-    data = {}
-    for name, info in RUNS_NORM.items():
-        print(f"  Downloading {name} ...", end=" ", flush=True)
-        run = api.run(f"{ENTITY}/{PROJECT}/{info['id']}")
-        hist = run.history(pandas=False)
-        successes = []
-        for h in hist:
-            step = h.get("_step")
-            succ = h.get("eval/episode_success")
-            if step is not None and succ is not None:
-                successes.append((step, succ))
-        successes.sort(key=lambda x: x[0])
-        data[name] = {
-            "steps": [s[0] for s in successes],
-            "values": [s[1] for s in successes],
-        }
-        print(f"  {len(successes)} points, final={successes[-1][1]:.1f}")
-
-    with open(cache_path, "w") as f:
-        json.dump(data, f)
-    return data
-
-
-def make_norm_plot(data, smooth=3):
-    """Plot comparing Pre-LN vs Post-LN normalization
-    with State mode, semantic tokenization, flatten pooling at depth 8."""
-
-    fig, ax = plt.subplots(1, 1, figsize=(6.5, 2.75), constrained_layout=True)
-
-    linestyles = {
-        "pre":  (0, ()),
-        "post": (0, (4, 1.5)),
-    }
-
-    for name in RUNS_NORM:
-        series = data[name]
-        steps = np.array(series["steps"]) + 1
-        values = np.array(series["values"])
-
-        if smooth > 1:
-            kernel = np.ones(smooth) / smooth
-            values_pad = np.pad(values, (smooth // 2, smooth // 2), mode="edge")
-            values = np.convolve(values_pad, kernel, mode="valid")[:len(values)]
-
-        ax.plot(steps, values, color=NORM_COLORS[name], ls=linestyles[name], lw=1.2,
-                label=RUNS_NORM[name]["label"])
-
-    ax.set_xlabel("Env Steps (M)")
-    ax.set_ylabel("Time at goal")
-    ax.set_xlim(0, 105)
-    ax.set_ylim(bottom=0)
-    ax.grid(True, which="both", axis="y")
-
-    ax.legend(loc="upper left", frameon=True, fancybox=False,
-              edgecolor="black", framealpha=0.9, handlelength=2.5)
-
-    save_fig(fig, "wandb_norm_compare")
-    return fig
-
-
-def download_embed_norm(force=False):
-    """Download eval/episode_success for embedding normalization comparison runs."""
-    cache_path = OUT_DIR / "_wandb_cache_embed_norm.json"
-    if cache_path.exists() and not force:
-        print(f"  Using cached data from {cache_path}")
-        with open(cache_path) as f:
-            return json.load(f)
-
-    api = wandb.Api()
-    data = {}
-    for name, info in RUNS_EMBED_NORM.items():
-        print(f"  Downloading {name} ...", end=" ", flush=True)
-        run = api.run(f"{ENTITY}/{PROJECT}/{info['id']}")
-        hist = run.history(pandas=False)
-        successes = []
-        for h in hist:
-            step = h.get("_step")
-            succ = h.get("eval/episode_success")
-            if step is not None and succ is not None:
-                successes.append((step, succ))
-        successes.sort(key=lambda x: x[0])
-        data[name] = {
-            "steps": [s[0] for s in successes],
-            "values": [s[1] for s in successes],
-        }
-        print(f"  {len(successes)} points, final={successes[-1][1]:.1f}")
-
-    with open(cache_path, "w") as f:
-        json.dump(data, f)
-    return data
-
-
-def make_embed_norm_plot(data, smooth=3):
-    """Plot comparing embedding normalization strategies
-    (Base, L2+learnable T, SIGReg, Weak SIGReg)
-    with State mode, semantic tokenization, cls pooling at depth 8."""
-
-    fig, ax = plt.subplots(1, 1, figsize=(6.5, 2.75), constrained_layout=True)
-
-    linestyles = {
-        "base":       (0, ()),
-        "l2":         (0, (3, 1.5)),
-        "sigreg":     (0, (5, 2)),
-        "weak_sigreg": (0, (1, 1)),
-    }
-
-    for name in RUNS_EMBED_NORM:
-        series = data[name]
-        steps = np.array(series["steps"]) + 1
-        values = np.array(series["values"])
-
-        if smooth > 1:
-            kernel = np.ones(smooth) / smooth
-            values_pad = np.pad(values, (smooth // 2, smooth // 2), mode="edge")
-            values = np.convolve(values_pad, kernel, mode="valid")[:len(values)]
-
-        ax.plot(steps, values, color=EMBED_NORM_COLORS[name], ls=linestyles[name], lw=1.2,
-                label=RUNS_EMBED_NORM[name]["label"])
-
-    ax.set_xlabel("Env Steps (M)")
-    ax.set_ylabel("Time at goal")
-    ax.set_xlim(0, 105)
-    ax.set_ylim(bottom=0)
-    ax.grid(True, which="both", axis="y")
-
-    ax.legend(loc="upper left", frameon=True, fancybox=False,
-              edgecolor="black", framealpha=0.9, handlelength=2.5)
-
-    save_fig(fig, "wandb_embed_norm_compare")
-    return fig
-
-
-def download_losses(force=False):
-    """Download actor_loss, critic_loss and eval/episode_success for early-run analysis."""
-    cache_path = OUT_DIR / "_wandb_cache_losses.json"
-    if cache_path.exists() and not force:
-        print(f"  Using cached data from {cache_path}")
-        with open(cache_path) as f:
-            return json.load(f)
-
-    api = wandb.Api()
-    data = {}
-    for info in RUNS_LOSSES:
-        label = info["label"]
-        print(f"  Downloading {label} ...", end=" ", flush=True)
-        run = api.run(f"{ENTITY}/{PROJECT}/{info['id']}")
-        hist = run.history(pandas=False)
-        steps = []
-        actor_losses = []
-        critic_losses = []
-        successes = []
-        for h in hist:
-            step = h.get("_step")
-            al = h.get("training/actor_loss")
-            cl = h.get("training/critic_loss")
-            succ = h.get("eval/episode_success")
-            if step is not None:
-                steps.append(step)
-                actor_losses.append(al if al is not None else float("nan"))
-                critic_losses.append(cl if cl is not None else float("nan"))
-                successes.append(succ if succ is not None else float("nan"))
-        data[label] = {
-            "steps": steps,
-            "actor_loss": actor_losses,
-            "critic_loss": critic_losses,
-            "success": successes,
-        }
-        print(f"  {len(steps)} points")
-
-    with open(cache_path, "w") as f:
-        json.dump(data, f)
-    return data
-
-
-def make_losses_plot(data, smooth=3):
-    """Plot actor and critic loss for early transformer runs
-    to illustrate training instability (losses rising after ~20-40 epochs)."""
-
-    fig, ax = plt.subplots(1, 1, figsize=(6.5, 4), constrained_layout=True)
-
-    for info in RUNS_LOSSES:
-        label = info["label"]
-        color = info["color"]
-        series = data[label]
-        steps = np.array(series["steps"]) + 1
-
-        # Actor loss (solid)
-        vals = np.array(series["actor_loss"])
-        if smooth > 1 and len(vals) >= smooth:
-            kernel = np.ones(smooth) / smooth
-            vals_pad = np.pad(vals, (smooth // 2, smooth // 2), mode="edge")
-            vals = np.convolve(vals_pad, kernel, mode="valid")[:len(vals)]
-        ax.plot(steps, vals, color=color, ls="-", lw=1.2,
-                label=f"{label} (actor)")
-
-        # Critic loss (dashed)
-        vals = np.array(series["critic_loss"])
-        if smooth > 1 and len(vals) >= smooth:
-            kernel = np.ones(smooth) / smooth
-            vals_pad = np.pad(vals, (smooth // 2, smooth // 2), mode="edge")
-            vals = np.convolve(vals_pad, kernel, mode="valid")[:len(vals)]
-        ax.plot(steps, vals, color=color, ls="--", lw=1.2,
-                label=f"{label} (critic)")
-
-    ax.axvspan(30, 50, color="red", alpha=0.08, zorder=0)
-
-    ax.set_xlabel("Env Steps (M)")
-    ax.set_ylabel("Loss")
-    ax.set_xlim(0, 105)
-    ax.set_ylim(3, 5)
-    ax.grid(True, which="both", axis="y")
-    ax.legend(loc="upper left", frameon=True, fancybox=False,
-              edgecolor="black", framealpha=0.9, handlelength=2.5, fontsize=6.5)
-
-    save_fig(fig, "wandb_losses_appendix")
-    return fig
-
-
-def download_temperature(force=False):
-    """Download log_temperature and eval/episode_success for the temperature run."""
-    cache_path = OUT_DIR / "_wandb_cache_temperature.json"
-    if cache_path.exists() and not force:
-        print(f"  Using cached data from {cache_path}")
-        with open(cache_path) as f:
-            return json.load(f)
-
-    api = wandb.Api()
-    run = api.run(f"{ENTITY}/{PROJECT}/3i9ngrhw")
-    hist = run.history(pandas=False)
-    steps = []
-    log_temps = []
-    successes = []
-    for h in hist:
-        step = h.get("_step")
-        lt = h.get("training/log_temperature")
-        succ = h.get("eval/episode_success")
-        if step is not None:
-            steps.append(step)
-            log_temps.append(lt if lt is not None else float("nan"))
-            successes.append(succ if succ is not None else float("nan"))
-
-    data = {
-        "steps": steps,
-        "log_temperature": log_temps,
-        "success": successes,
-    }
-    print(f"  Downloaded {len(steps)} points")
-
-    with open(cache_path, "w") as f:
-        json.dump(data, f)
-    return data
-
-
-def make_temperature_plot(data, smooth=3):
-    """Plot temperature parameter and time at goal for the failed L2+learnable T run
-    to illustrate why it collapsed."""
-
-    fig, (ax_temp, ax_succ) = plt.subplots(1, 2, figsize=(6.5, 2.75),
-                                           constrained_layout=True, sharex=True)
-    steps = np.array(data["steps"]) + 1
-
-    # Temperature (log scale, left y)
-    log_temps = np.array(data["log_temperature"])
-    if smooth > 1 and len(log_temps) >= smooth:
-        kernel = np.ones(smooth) / smooth
-        pad = np.pad(log_temps, (smooth // 2, smooth // 2), mode="edge")
-        log_temps = np.convolve(pad, kernel, mode="valid")[:len(log_temps)]
-    ax_temp.plot(steps, log_temps, color="#D55E00", ls="-", lw=1.2,
-                 label="log temperature")
-    ax_temp.set_xlabel("Env Steps (M)")
-    ax_temp.set_ylabel("log Temperature")
-    ax_temp.set_xlim(0, 105)
-    ax_temp.grid(True, which="both", axis="y")
-    ax_temp.legend(loc="lower left", frameon=True, fancybox=False,
-                   edgecolor="black", framealpha=0.9)
-
-    # Success rate
-    succ = np.array(data["success"])
-    if smooth > 1 and len(succ) >= smooth:
-        kernel = np.ones(smooth) / smooth
-        pad = np.pad(succ, (smooth // 2, smooth // 2), mode="edge")
-        succ = np.convolve(pad, kernel, mode="valid")[:len(succ)]
-    ax_succ.plot(steps, succ, color="#0072B2", ls="-", lw=1.2,
-                 label="time at goal")
-    ax_succ.set_xlabel("Env Steps (M)")
-    ax_succ.set_ylabel("Time at goal")
-    ax_succ.set_xlim(0, 105)
-    ax_succ.set_ylim(bottom=0)
-    ax_succ.grid(True, which="both", axis="y")
-    ax_succ.legend(loc="upper left", frameon=True, fancybox=False,
-                   edgecolor="black", framealpha=0.9)
-
-    save_fig(fig, "wandb_temperature_appendix")
-    return fig
-
-
-def download_deep_comparison(force=False):
-    """Download eval/episode_success for the deep/crashed run comparison."""
-    cache_path = OUT_DIR / "_wandb_cache_deep.json"
-    if cache_path.exists() and not force:
-        print(f"  Using cached data from {cache_path}")
-        with open(cache_path) as f:
-            return json.load(f)
-
-    api = wandb.Api()
-    runs_info = [
-        ("64-State (crashed)", "xxja73yf"),
-        ("32-State-2", "i42kndl4"),
-        ("32-MLP", "mkhc4fov"),
-    ]
-    data = {}
-    for label, rid in runs_info:
-        print(f"  Downloading {label} ...", end=" ", flush=True)
-        run = api.run(f"{ENTITY}/{PROJECT}/{rid}")
-        hist = run.history(pandas=False)
-        successes = []
-        for h in hist:
-            step = h.get("_step")
-            succ = h.get("eval/episode_success")
-            if step is not None and succ is not None:
-                successes.append((step, succ))
-        successes.sort(key=lambda x: x[0])
-        data[label] = {
-            "steps": [s[0] for s in successes],
-            "values": [s[1] for s in successes],
-        }
-        print(f"  {len(successes)} points, final={successes[-1][1]:.1f}")
-
-    with open(cache_path, "w") as f:
-        json.dump(data, f)
-    return data
-
-
-def make_deep_comparison_plot(data, smooth=3):
-    """Plot time at goal for the crashed 64-State run vs 32-State-2 and 32-MLP."""
-    
-    fig, ax = plt.subplots(1, 1, figsize=(6.5, 2.75), constrained_layout=True)
-
-    styles = {
-        "64-State (crashed)": {"color": "#CC79A7", "ls": (0, (4, 1.5)), "label": "64-State (crashed)"},
-        "32-State-2":           {"color": "#0072B2", "ls": "-", "label": "32-State"},
-        "32-MLP":             {"color": "#333333", "ls": "-", "label": "32-MLP"},
-    }
-
-    for label in data:
-        series = data[label]
-        steps = np.array(series["steps"]) + 1
-        values = np.array(series["values"])
-
-        if smooth > 1:
-            kernel = np.ones(smooth) / smooth
-            vals_pad = np.pad(values, (smooth // 2, smooth // 2), mode="edge")
-            values = np.convolve(vals_pad, kernel, mode="valid")[:len(values)]
-
-        sty = styles[label]
-        ax.plot(steps, values, color=sty["color"], ls=sty["ls"], lw=1.2, label=sty["label"])
+        values = smooth_series(np.array(series["values"]))
+
+        style = ARCH_COLORS[info["arch"]]
+        color = style["color_fn"](info["depth"])
+        ax.plot(steps, values, color=color, ls="-", lw=1.2, label=info["label"])
 
     ax.set_xlabel("Env Steps (M)")
     ax.set_ylabel("Time at goal")
@@ -834,64 +254,84 @@ def make_deep_comparison_plot(data, smooth=3):
     ax.grid(True, which="both", axis="y")
     ax.legend(loc="upper left", frameon=True, fancybox=False,
               edgecolor="black", framealpha=0.9, handlelength=2.5)
+    save_fig(fig, "wandb_mlp_vs_transformer")
 
-    save_fig(fig, "wandb_deep_comparison")
-    return fig
 
+def make_mlp_bge_vs_base_plot(data):
+    """Plot #5: MLP x BGE exact cls hybrid vs MLP x Base (3 sizes).
+
+    BGE variants use green (solid), Base variants use blue (dashed).
+    Each size gets its own shade (light → dark for larger depth).
+    """
+    fig, ax = plt.subplots(1, 1, figsize=(6.5, 2.75), constrained_layout=True)
+
+    # Distinct colour families: Base = blues, BGE = greens
+    base_depth_colors = {8: plt.cm.Blues(0.55), 16: plt.cm.Blues(0.72), 32: plt.cm.Blues(0.90)}
+    bge_depth_colors  = {8: plt.cm.Greens(0.45), 16: plt.cm.Greens(0.65), 32: plt.cm.Greens(0.85)}
+
+    for key, info in RUNS_MLP_BGE_VS_BASE.items():
+        series = data[key]
+        steps = np.array(series["steps"]) + 1
+        values = smooth_series(np.array(series["values"]))
+
+        # Determine depth from label
+        lbl = info["label"]
+        if "8" in lbl:
+            depth = 8
+        elif "16" in lbl:
+            depth = 16
+        else:
+            depth = 32
+
+        is_bge = "BGE" in lbl
+        color = bge_depth_colors[depth] if is_bge else base_depth_colors[depth]
+        ls = "-"
+        lw = 1.4 if is_bge else 1.0
+        ax.plot(steps, values, color=color, ls=ls, lw=lw, label=lbl)
+
+    ax.set_xlabel("Env Steps (M)")
+    ax.set_ylabel("Time at goal")
+    ax.set_xlim(0, 105)
+    ax.set_ylim(bottom=0)
+    ax.grid(True, which="both", axis="y")
+    ax.legend(loc="upper left", frameon=True, fancybox=False,
+              edgecolor="black", framealpha=0.9, handlelength=2.5)
+    save_fig(fig, "wandb_mlp_bge_vs_base")
+
+
+# =====================================================================
+# Main
+# =====================================================================
 
 if __name__ == "__main__":
-    print("=== Step 1: Downloading data from W&B (MLP vs State) ===")
-    data = download_all(force=False)
+    print("=== Plot 1: Pretrained encoders vs trainable encoder ===")
+    data_enc = download_runs(RUNS_ENCODER, "encoder", force=False)
+    make_encoder_plot(data_enc)
 
-    print("\n=== Step 2: Plotting MLP vs State ===")
-    make_plot(data, smooth=3)
+    print("\n=== Plot 2: Description type comparison ===")
+    data_desc = download_runs(RUNS_DESC_TYPE, "description_type", force=False)
+    make_description_type_plot(data_desc)
 
-    print("\n=== Step 3: Downloading data from W&B (transformer modes) ===")
-    data_tm = download_transformer_modes(force=False)
+    print("\n=== Plot 3: Pooling comparison (TBD — missing runs) ===")
+    if RUNS_POOLING:
+        data_pool = download_runs(RUNS_POOLING, "pooling", force=False)
+        # make_pooling_plot(data_pool)
+    else:
+        print("  Skipped — no pooling runs defined yet.")
 
-    print("\n=== Step 4: Plotting transformer modes ===")
-    make_transformer_modes_plot(data_tm, smooth=3)
+    print("\n=== Plot 4: MLP vs Transformer BASE runs ===")
+    data_mlptr = download_runs(RUNS_MLP_VS_TR, "mlp_vs_tr", force=False)
+    make_mlp_vs_transformer_plot(data_mlptr)
 
-    print("\n=== Step 5: Downloading data from W&B (tokenization) ===")
-    data_tok = download_tokenization(force=False)
+    print("\n=== Plot 5: MLP x BGE exact cls hybrid vs MLP x Base ===")
+    data_mlp_bge = download_runs(RUNS_MLP_BGE_VS_BASE, "mlp_bge_vs_base", force=False)
+    make_mlp_bge_vs_base_plot(data_mlp_bge)
 
-    print("\n=== Step 6: Plotting tokenization comparison ===")
-    make_tokenization_plot(data_tok, smooth=3)
-
-    print("\n=== Step 7: Downloading data from W&B (pooling) ===")
-    data_pool = download_pooling(force=False)
-
-    print("\n=== Step 8: Plotting pooling comparison ===")
-    make_pooling_plot(data_pool, smooth=3)
-
-    print("\n=== Step 9: Downloading data from W&B (norm) ===")
-    data_norm = download_norm(force=False)
-
-    print("\n=== Step 10: Plotting norm comparison ===")
-    make_norm_plot(data_norm, smooth=3)
-
-    print("\n=== Step 11: Downloading data from W&B (embed norm) ===")
-    data_en = download_embed_norm(force=False)
-
-    print("\n=== Step 12: Plotting embedding normalization comparison ===")
-    make_embed_norm_plot(data_en, smooth=3)
-
-    print("\n=== Step 13: Downloading data from W&B (losses appendix) ===")
-    data_losses = download_losses(force=False)
-
-    print("\n=== Step 14: Plotting losses appendix ===")
-    make_losses_plot(data_losses, smooth=3)
-
-    print("\n=== Step 15: Downloading data from W&B (temperature appendix) ===")
-    data_temp = download_temperature(force=False)
-
-    print("\n=== Step 16: Plotting temperature appendix ===")
-    make_temperature_plot(data_temp, smooth=3)
-
-    print("\n=== Step 17: Downloading data from W&B (deep comparison) ===")
-    data_deep = download_deep_comparison(force=False)
-
-    print("\n=== Step 18: Plotting deep comparison ===")
-    make_deep_comparison_plot(data_deep, smooth=3)
+    print("\n=== Plot 6: TR x BGE exact cls hybrid vs TR x Base (TBD) ===")
+    if RUNS_TR_BGE_VS_BASE:
+        data_tr_bge = download_runs(RUNS_TR_BGE_VS_BASE, "tr_bge_vs_base", force=False)
+        # make_tr_bge_vs_base_plot(data_tr_bge)
+    else:
+        print("  Skipped — runs to be added later.")
 
     print(f"\nDone. Files in {OUT_DIR.resolve()}/")

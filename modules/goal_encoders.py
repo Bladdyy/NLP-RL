@@ -225,28 +225,29 @@ class HybridGoalEncoder(nn.Module):
     transformer_embed_dim: int = 144
     description_type: str = "coordinates"
     precomputed_embs: jnp.ndarray | None = None
+    cross_neg_count: int = 32
+    """Number of cross1 + cross2 negative pairs per sample in pairwise mode."""
 
     @nn.compact
-    def __call__(self, g: jnp.ndarray, pairwise: bool = False) -> jnp.ndarray:
-        """
-        Encode goals into embeddings.
+    def __call__(
+        self, g: jnp.ndarray | None = None, *, grid: bool = False, pairwise: bool = False
+    ) -> jnp.ndarray:
+        """Encode goals into embeddings.
 
         Args:
-            g: (B, 2) goal coordinates.
-            pairwise: When True, return a ``(B, 1 + 2 * offset, output_dim)``
-                tensor where ``offset = (B - 1) // 3`` and the three blocks
-                along axis=1 are::
-
-                    [0]            : (raw=goal[i], text=goal[i])   — diagonal
-                    [1:1+offset]   : (raw=goal[i], text=goal[j])   — cross1
-                    [1+offset:]    : (raw=goal[j], text=goal[i])   — cross2
-
-                Used to construct cross-modal negatives for the InfoNCE loss
-                without computing all B² raw×text combinations.
+            g: (B, 2) goal coordinates. Ignored when ``grid=True``.
+            grid: When True, ignore *g* and compute the ``(N, N, output_dim)``
+                grid of all composite embeddings ``f(raw_a, text_b)`` over the
+                ``N = len(possible_goals)`` distinct goals. Used by the cross
+                InfoNCE loss to gather negatives by goal index in O(N^2)
+                encoder work instead of O(B*K).
+            pairwise: When True, return a ``(B, 1 + 2*K, output_dim)``
+                tensor where ``K = cross_neg_count`` with diagonal + cross1 +
+                cross2 blocks (legacy per-batch path; ``grid`` is preferred).
 
         Returns:
-            ``(B, output_dim)`` when ``pairwise=False``, or
-            ``(B, 1 + 2 * offset, output_dim)`` when ``pairwise=True``.
+            ``(B, output_dim)`` normally; ``(B, 1 + 2*K, output_dim)`` when
+            ``pairwise=True``; ``(N, N, output_dim)`` when ``grid=True``.
         """
         lecun = variance_scaling(1 / 3, "fan_in", "uniform")
         bias = nn.initializers.zeros
@@ -256,6 +257,13 @@ class HybridGoalEncoder(nn.Module):
                 "embed_source='trainable' requires a finite goal set; "
                 "possible_goals must be provided."
             )
+
+        if grid:
+            if self.possible_goals is None:
+                raise ValueError("grid=True requires possible_goals to be set")
+            g_in = self.possible_goals          # (N, 2)
+        else:
+            g_in = g                            # (B, 2)
 
         # ── Compute shared components ─────────────────────────────────────
         if self.backbone == "mlp":
@@ -268,7 +276,7 @@ class HybridGoalEncoder(nn.Module):
                 output_dim=text_output_dim,
                 possible_goals=self.possible_goals,
                 description_type=self.description_type,
-            )(g)
+            )(g_in)
         else:
             text_repr = PrecomputedFrozenTextGoalEncoder(
                 possible_goals=self.possible_goals,
@@ -277,7 +285,7 @@ class HybridGoalEncoder(nn.Module):
                 pooling=self.pooling,
                 description_type=self.description_type,
                 precomputed_embs=self.precomputed_embs,
-            )(g)
+            )(g_in)
 
         # ── MLP backbone ────────────────────────────────────────────────
         if self.backbone == "mlp":
@@ -286,111 +294,141 @@ class HybridGoalEncoder(nn.Module):
                 text_repr = text_repr.mean(axis=1)
             # Project raw coords up so they don't get drowned by the
             # high-dim text representation.
-            g_proj = nn.Dense(64, kernel_init=lecun, bias_init=bias, name="g_proj_mlp")(g)  # 2→64
+            g_proj = nn.Dense(64, kernel_init=lecun, bias_init=bias, name="g_proj_mlp")(g_in)
+            D_text = text_repr.shape[-1]
+
+            W1 = self.param(
+                "mlp_dense1_kernel", lecun, (64 + D_text, self.mlp_width),
+            )
+            W1_raw = W1[:64, :]
+            W1_text = W1[64:, :]
+            b1 = self.param(
+                "mlp_dense1_bias", nn.initializers.zeros, (self.mlp_width,),
+            )
+            W2 = self.param(
+                "mlp_dense2_kernel", lecun, (self.mlp_width, self.output_dim),
+            )
+            b2 = self.param(
+                "mlp_dense2_bias", nn.initializers.zeros, (self.output_dim,),
+            )
+
+            if grid:
+                # (N, N, mlp_width) via outer sum of the two linear halves.
+                h_raw = g_proj @ W1_raw             # (N, mlp_width)
+                h_text = text_repr @ W1_text         # (N, mlp_width)
+                h = h_raw[:, None, :] + h_text[None, :, :] + b1
+                h = nn.swish(h)
+                x = h @ W2 + b2                      # (N, N, output_dim)
+                return x
 
             if pairwise:
-                B = g.shape[0]
-                offset = (B - 1) // 3
+                B = g_in.shape[0]
+                K = min(self.cross_neg_count, (B - 1) // 2)
 
-                # Indices for the `offset` items *after* i (mod B)
-                row_idx = jnp.arange(B)[:, None]                            # (B, 1)
-                col_idx = (row_idx + 1 + jnp.arange(offset)[None, :]) % B  # (B, offset)
+                row_idx = jnp.arange(B)[:, None]
+                col_idx = (row_idx + 1 + jnp.arange(K)[None, :]) % B
 
-                # (A) Diagonal: (raw=i, text=i)
-                diag_x = jnp.concatenate([g_proj, text_repr], axis=-1)[:, None, :]  # (B, 1, 64+D)
+                h_raw = g_proj @ W1_raw
+                h_text = text_repr @ W1_text
 
-                # (B) Cross1: (raw=i, text=j)  for j in col_idx[i]
-                g_proj_bc = jnp.broadcast_to(g_proj[:, None, :], (B, offset, 64))
-                text_c1 = text_repr[col_idx]                                       # (B, offset, D)
-                x1 = jnp.concatenate([g_proj_bc, text_c1], axis=-1)                # (B, offset, 64+D)
+                diag_h = (h_raw + h_text + b1)[:, None, :]
+                h_raw_bc = jnp.broadcast_to(h_raw[:, None, :], (B, K, self.mlp_width))
+                x1_h = h_raw_bc + h_text[col_idx] + b1
+                h_raw_c2 = h_raw[col_idx]
+                h_text_bc = jnp.broadcast_to(h_text[:, None, :], (B, K, self.mlp_width))
+                x2_h = h_raw_c2 + h_text_bc + b1
 
-                # (C) Cross2: (raw=j, text=i)  for j in col_idx[i]
-                g_proj_c2 = g_proj[col_idx]                                        # (B, offset, 64)
-                text_bc = jnp.broadcast_to(
-                    text_repr[:, None, :], (B, offset, text_repr.shape[-1])
-                )
-                x2 = jnp.concatenate([g_proj_c2, text_bc], axis=-1)                # (B, offset, 64+D)
-
-                # Combine → (B, 1 + 2*offset, 64+D) → (B*(1+2*offset), 64+D)
-                x = jnp.concatenate([diag_x, x1, x2], axis=1)
-                x = x.reshape(B * (1 + 2 * offset), -1)
-                x = nn.Dense(self.mlp_width, kernel_init=lecun, bias_init=bias)(x)
-                x = nn.swish(x)
-                x = nn.Dense(self.output_dim, kernel_init=lecun, bias_init=bias)(x)
-                return x.reshape(B, 1 + 2 * offset, self.output_dim)
+                h = jnp.concatenate([diag_h, x1_h, x2_h], axis=1)
+                h = h.reshape(B * (1 + 2 * K), self.mlp_width)
+                h = nn.swish(h)
+                x = h @ W2 + b2
+                return x.reshape(B, 1 + 2 * K, self.output_dim)
 
             x = jnp.concatenate([g_proj, text_repr], axis=-1)
-            x = nn.Dense(self.mlp_width, kernel_init=lecun, bias_init=bias)(x)
-            x = nn.swish(x)
-            x = nn.Dense(self.output_dim, kernel_init=lecun, bias_init=bias)(x)
+            x = nn.swish(x @ W1 + b1)
+            x = x @ W2 + b2
             return x
 
         # ── Semantic transformer backbone ───────────────────────────────
         g_token = nn.Dense(
             self.transformer_embed_dim, kernel_init=lecun, bias_init=bias, name="g_proj",
-        )(g)  # (B, embed_dim)
+        )(g_in)
+
+        if grid:
+            if text_repr.ndim == 3:
+                text_repr = text_repr.mean(axis=1)
+            N = g_in.shape[0]
+            raw_tok = jnp.broadcast_to(
+                g_token[:, None, None, :], (N, N, 1, self.transformer_embed_dim)
+            )
+            text_tok = jnp.broadcast_to(
+                text_repr[None, :, None, :], (N, N, 1, self.transformer_embed_dim)
+            )
+            all_tokens = jnp.concatenate([raw_tok, text_tok], axis=2)
+            all_tokens = all_tokens.reshape(N * N, 2, self.transformer_embed_dim)
+            x = nn.remat(TransformerBackbone)(
+                embed_dim=self.transformer_embed_dim,
+                num_layers=4, num_heads=4, mlp_ratio=4,
+                num_patches=0, dropout_rate=0.0, pooling="cls",
+            )(all_tokens)
+            x = nn.Dense(self.output_dim, kernel_init=lecun, bias_init=bias)(x)
+            return x.reshape(N, N, self.output_dim)
 
         if pairwise:
-            B = g.shape[0]
-            offset = (B - 1) // 3
-
-            # Pool token-mode to a single vector, same as MLP backbone does.
+            B = g_in.shape[0]
+            K = min(self.cross_neg_count, (B - 1) // 2)
             if text_repr.ndim == 3:
                 text_repr = text_repr.mean(axis=1)
 
-            # Indices for the `offset` items *after* i (mod B)
+            diag_tokens = jnp.stack([g_token, text_repr], axis=1)[:, None, :, :]
             row_idx = jnp.arange(B)[:, None]
-            col_idx = (row_idx + 1 + jnp.arange(offset)[None, :]) % B
-
-            # (A) Diagonal: (raw=i, text=i)  →  (B, 2, D)
-            diag_tokens = jnp.stack([g_token, text_repr], axis=1)[:, None, :, :]  # (B, 1, 2, D)
-
-            # (B) Cross1: (raw=i, text=j) for j in col_idx[i]
+            col_idx = (row_idx + 1 + jnp.arange(K)[None, :]) % B
             raw_tok_bc = jnp.broadcast_to(
-                g_token[:, None, None, :], (B, offset, 1, self.transformer_embed_dim)
+                g_token[:, None, None, :], (B, K, 1, self.transformer_embed_dim)
             )
-            text_c1 = text_repr[col_idx][:, :, None, :]  # (B, offset, 1, D)
-            tokens_c1 = jnp.concatenate([raw_tok_bc, text_c1], axis=2)  # (B, offset, 2, D)
-
-            # (C) Cross2: (raw=j, text=i) for j in col_idx[i]
-            raw_c2 = g_token[col_idx][:, :, None, :]  # (B, offset, 1, D)
+            tokens_c1 = jnp.concatenate(
+                [raw_tok_bc, text_repr[col_idx][:, :, None, :]], axis=2
+            )
+            raw_c2 = g_token[col_idx][:, :, None, :]
             text_tok_bc = jnp.broadcast_to(
-                text_repr[:, None, None, :], (B, offset, 1, self.transformer_embed_dim)
+                text_repr[:, None, None, :], (B, K, 1, self.transformer_embed_dim)
             )
-            tokens_c2 = jnp.concatenate([raw_c2, text_tok_bc], axis=2)  # (B, offset, 2, D)
+            tokens_c2 = jnp.concatenate([raw_c2, text_tok_bc], axis=2)
 
-            # Combine → (B, 1 + 2*offset, 2, D) → (B*(1+2*offset), 2, D)
             all_tokens = jnp.concatenate([diag_tokens, tokens_c1, tokens_c2], axis=1)
-            all_tokens = all_tokens.reshape(B * (1 + 2 * offset), 2, self.transformer_embed_dim)
-            x = TransformerBackbone(
+            all_tokens = all_tokens.reshape(B * (1 + 2 * K), 2, self.transformer_embed_dim)
+            x = nn.remat(TransformerBackbone)(
                 embed_dim=self.transformer_embed_dim,
-                num_layers=4,
-                num_heads=4,
-                mlp_ratio=4,
-                num_patches=0,
-                dropout_rate=0.0,
-                pooling="cls",
+                num_layers=4, num_heads=4, mlp_ratio=4,
+                num_patches=0, dropout_rate=0.0, pooling="cls",
             )(all_tokens)
             x = nn.Dense(self.output_dim, kernel_init=lecun, bias_init=bias)(x)
-            return x.reshape(B, 1 + 2 * offset, self.output_dim)
+            return x.reshape(B, 1 + 2 * K, self.output_dim)
 
         # ── Standard (non-pairwise) semantic backbone ─────────────────────
         if text_repr.ndim == 3:
-            tokens = jnp.concatenate(
-                [g_token[:, None, :], text_repr], axis=1,
-            )  # (B, 1 + seq_len, embed_dim)
+            tokens = jnp.concatenate([g_token[:, None, :], text_repr], axis=1)
         else:
-            tokens = jnp.stack([g_token, text_repr], axis=1)  # (B, 2, embed_dim)
+            tokens = jnp.stack([g_token, text_repr], axis=1)
 
-        x = TransformerBackbone(
+        x = nn.remat(TransformerBackbone)(
             embed_dim=self.transformer_embed_dim,
-            num_layers=4,
-            num_heads=4,
-            mlp_ratio=4,
-            num_patches=0,
-            dropout_rate=0.0,
-            pooling="cls",
+            num_layers=4, num_heads=4, mlp_ratio=4,
+            num_patches=0, dropout_rate=0.0, pooling="cls",
         )(tokens)
-
         x = nn.Dense(self.output_dim, kernel_init=lecun, bias_init=bias)(x)
         return x
+
+    def goal_indices(self, g: jnp.ndarray) -> jnp.ndarray:
+        """Map (B, 2) batch goals to (B,) indices into possible_goals.
+
+        Uses nearest-neighbour matching, identical to the mapping the
+        frozen-text encoder applies internally, so ``grid[idx, :]`` is
+        consistent with the per-sample encoder output.
+        """
+        if self.possible_goals is None:
+            raise ValueError("goal_indices requires possible_goals to be set")
+        dists = jnp.linalg.norm(
+            g[:, None, :] - self.possible_goals[None, :, :], axis=-1,
+        )
+        return jnp.argmin(dists, axis=-1)

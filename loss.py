@@ -68,29 +68,34 @@ def create_loss_functions(actor, sa_encoder, g_encoder, args, target_entropy):
         sa_repr = sa_encoder.apply(sa_encoder_params, obs, action)
 
         if args.hybrid_goal_encoder and args.negative_mode == "cross":
-            # Compute only the needed (raw, text) pairs: diagonal + cross1 + cross2.
-            # Returns (B, 1 + 2*offset, D) — see HybridGoalEncoder.__call__ docstring.
-            g_repr_pairs = g_encoder.apply(g_encoder_params, goals, pairwise=True)
+            # Cache all N^2 composite embeddings once (N = number of distinct
+            # goals, typically ~10), then gather negatives by goal index.
+            # The composite f(raw_a, text_b) depends only on the goal pair
+            # (a, b) and the (fixed-for-this-step) weights, so computing it
+            # N*N times and gathering is mathematically identical to running
+            # the encoder per batch sample — but O(N^2) instead of O(B*K).
+            grid = g_encoder.apply(g_encoder_params, grid=True)  # (N, N, D)
 
             B = goals.shape[0]
-            offset = (B - 1) // 3
+            goal_idx = g_encoder.apply(g_encoder_params, goals, method="goal_indices")  # (B,)
+            N = grid.shape[0]
+            K = min(args.cross_negative_count, (N - 1) // 2)
+            n_std = N - 1 - 2 * K
 
-            # Indices for the `offset` items *after* i (mod B)
-            row_idx = jnp.arange(B)[:, None]      # (B, 1)
-            col_idx = (row_idx + 1 + jnp.arange(offset)[None, :]) % B  # (B, offset)
+            # Per-sample partner goal indices (mod N), kept disjoint between
+            # the cross and standard blocks so the total negatives per row is
+            # exactly N - 1.
+            row_idx = jnp.arange(B)[:, None]
+            cross_g = (goal_idx[:, None] + 1 + jnp.arange(K)[None, :]) % N        # (B, K)
+            std_g = (goal_idx[:, None] + 1 + 2 * K + jnp.arange(n_std)[None, :]) % N  # (B, n_std)
 
-            diag = g_repr_pairs[:, 0]                      # (B, D)  — (raw=i, text=i)
-            pos_g = diag[:, None, :]                       # (B, 1, D)
+            pos_g = grid[goal_idx, goal_idx][:, None, :]                  # (B, 1, D)
+            std_neg = grid[goal_idx[:, None], std_g]                       # (B, n_std, D)
+            x1_neg = grid[goal_idx[:, None], cross_g]                     # (B, K, D) raw=i,text=j
+            x2_neg = grid[cross_g, goal_idx[:, None]]                     # (B, K, D) raw=j,text=i
 
-            # Standard negatives: (raw=j, text=j) for j ≠ i  — indexed from diagonal
-            std_g = diag[col_idx]                          # (B, offset, D)
-            # Cross1 negatives: (raw=i, text=j) — raw correct, text wrong
-            x1_g = g_repr_pairs[:, 1:1 + offset]            # (B, offset, D)
-            # Cross2 negatives: (raw=j, text=i) — raw wrong, text correct
-            x2_g = g_repr_pairs[:, 1 + offset:]             # (B, offset, D)
-
-            n_neg = 3 * offset  # standard + cross1 + cross2 negatives per row
-            all_g = jnp.concatenate([pos_g, std_g, x1_g, x2_g], axis=1)  # (B, 1 + n_neg, D)
+            n_neg = n_std + 2 * K  # total negatives per row (== N - 1)
+            all_g = jnp.concatenate([pos_g, std_neg, x1_neg, x2_neg], axis=1)  # (B, 1 + n_neg, D)
 
             logits = -jnp.sqrt(jnp.sum((sa_repr[:, None, :] - all_g) ** 2, axis=-1))
 

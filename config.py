@@ -77,6 +77,10 @@ class Args:
     trainable_embedding: bool = False
     hybrid_goal_encoder: bool = False
     negative_mode: Literal["standard", "cross"] = "standard"
+    cross_negative_count: int = 32
+    """Number of cross1 + cross2 negative pairs per sample in "cross" mode.
+    The rest of the negative budget is filled with cheap standard (diagonal)
+    negatives to keep the total negatives ≈ batch_size - 1."""
     text_pooling: str = "cls"  # "cls", "mean", or "token"
     tokenization: str = "patches"  # "patches", "semantic", or "per_dim"
     # Transformer-specific config (only used when transformer_mode != "none")
